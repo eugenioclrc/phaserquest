@@ -10,8 +10,8 @@ const rwc = require('random-weighted-choice'); // used to randomly decide which 
 const GameServer = {
   map: null, // object containing all the data about the world map
   mapReady: false, // is the server done processing the map or not
-    // frequency of the server update loop ; rate at which the player and monsters objects will call their "update" methods
-    // This is NOT the rate at which updates are sent to clients (see server.clientUpdateRate)
+  // frequency of the server update loop ; rate at which the player and monsters objects will call their "update" methods
+  // This is NOT the rate at which updates are sent to clients (see server.clientUpdateRate)
   updateRate: 1000 / 12,
   regenRate: 1000 * 2, // Rate at which the regenerate() method is called
   itemRespawnDelay: 1000 * 30, // Delay (ms) after which a respawnable item will respawn
