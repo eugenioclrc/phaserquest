@@ -5,7 +5,10 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "babel-node server.js"
+  },
+  "engines": {
+    "node": ">=7.7.1"
   },
   "repository": {
     "type": "git",
@@ -22,6 +25,7 @@
   "license": "MIT",
   "homepage": "https://github.com/Jerenaux/phaserquest#readme",
   "dependencies": {
+    "babel": "^6.23.0",
     "clone": "^2.1.0",
     "express": "^4.14.0",
     "mongodb": "^2.2.16",
@@ -30,5 +34,14 @@
     "quickselect": "^1.0.0",
     "random-weighted-choice": "^0.1.3",
     "socket.io": "^1.7.2"
+  },
+  "devDependencies": {
+    "babel-cli": "^6.24.1",
+    "babel-eslint": "^7.1.1",
+    "babel-preset-es2015": "^6.24.1",
+    "eslint": "^3.19.0",
+    "eslint-config-airbnb-base": "^11.1.3",
+    "eslint-config-defaults": "^9.0.0",
+    "eslint-plugin-import": "^2.2.0"
   }
 }
