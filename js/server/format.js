@@ -6,19 +6,21 @@
 const fs = require('fs');
 const clone = require('clone');
 
-function Layer(w, h, name, level) {
-  this.width = w;
-  this.height = h;
-  this.name = name;
-  this.type = 'tilelayer';
-  this.visible = true;
-  this.x = 0;
-  this.y = 0;
-  this.data = []; // Array of tiles
-  this.opacity = 1;
-  this.properties = { // stores additional non-standard properties
-    level, // high or ground
-  };
+class Layer {
+  constructor(w, h, name, level) {
+    this.width = w;
+    this.height = h;
+    this.name = name;
+    this.type = 'tilelayer';
+    this.visible = true;
+    this.x = 0;
+    this.y = 0;
+    this.data = []; // Array of tiles
+    this.opacity = 1;
+    this.properties = { // stores additional non-standard properties
+      level, // high or ground
+    };
+  }
 }
 
 function tileMap(map, isClient) {
