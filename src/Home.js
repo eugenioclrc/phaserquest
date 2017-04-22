@@ -22,7 +22,7 @@ Home.init = function init() {
       game.scale.forceOrientation(true, false);
     }
   }
-  // game.add.plugin(PhaserInput.InputField); // https://github.com/orange-games/phaser-input
+  game.plugins.add(PhaserInput.Plugin); // https://github.com/orange-games/phaser-input
   game.scale.pageAlignHorizontally = true;
   Game.isNewPlayer = Client.isNewPlayer();
 };
