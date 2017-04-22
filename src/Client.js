@@ -1,9 +1,10 @@
 /**
  * Created by Jerome on 21-10-16.
  */
-/* eslint-disable */
 
 import CoDec from './CoDec';
+import Game from './Game';
+import Decoder from './Decoder';
 
 const Client = {
   // when events arrive before the flag playerIsInitialized is set to true, they
@@ -29,7 +30,7 @@ Client.socket = require('socket.io-client')(/*'http://localhost:3000'*/);
 
 const onevent = Client.socket.onevent;
 
-Client.socket.onevent = function (packet) {
+Client.socket.onevent = function oneventEvt(packet) {
   if (!Game.playerIsInitialized && packet.data[0] != Client.initEventName && packet.data[0] != 'dbError') {
     Client.eventsQueue.push(packet);
   } else {
@@ -37,17 +38,17 @@ Client.socket.onevent = function (packet) {
   }
 };
 
-Client.emptyQueue = function () { // Process the events that have been queued during initialization
+Client.emptyQueue = function emptyQueue() { // Process the events that have been queued during initialization
   for (let e = 0; e < Client.eventsQueue.length; e++) {
     onevent.call(Client.socket, Client.eventsQueue[e]);
   }
 };
 
-Client.requestData = function () { // request the data to be used for initWorld()
+Client.requestData = function requestData() { // request the data to be used for initWorld()
   Client.socket.emit('init-world', Client.getInitRequest());
 };
 
-Client.getInitRequest = function () { // Returns the data object to send to request the initialization data
+Client.getInitRequest = function getInitRequest() { // Returns the data object to send to request the initialization data
     // In case of a new player, set new to true and send the name of the player
     // Else, set new to false and send it's id instead to fetch the corresponding data in the database
   if (Client.isNewPlayer()) return { new: true, name: Client.getName(), clientTime: Date.now() };
@@ -55,7 +56,7 @@ Client.getInitRequest = function () { // Returns the data object to send to requ
   return { new: false, id, clientTime: Date.now() };
 };
 
-Client.isNewPlayer = function () {
+Client.isNewPlayer = function isNewPlayer() {
   const id = Client.getPlayerID();
   const name = Client.getName();
   const armor = Client.getArmor();
@@ -63,44 +64,44 @@ Client.isNewPlayer = function () {
   return !(id !== undefined && name && armor && weapon);
 };
 
-Client.setLocalData = function (id) { // store the player ID in localStorage
+Client.setLocalData = function setLocalData(id) { // store the player ID in localStorage
     // console.log('your ID : '+id);
   localStorage.setItem(Client.storageIDKey, id);
 };
 
-Client.getPlayerID = function () {
+Client.getPlayerID = function getPlayerID() {
   return localStorage.getItem(Client.storageIDKey);
 };
 
-Client.hasAchievement = function (id) {
+Client.hasAchievement = function hasAchievement(id) {
   return (!!localStorage.getItem(`ach${id}`));
 };
 
-Client.setAchievement = function (id) {
+Client.setAchievement = function setAchievement(id) {
   localStorage.setItem(`ach${id}`, true);
 };
 
-Client.setArmor = function (key) {
+Client.setArmor = function setArmor(key) {
   localStorage.setItem('armor', key);
 };
 
-Client.getArmor = function () {
+Client.getArmor = function getArmor() {
   return localStorage.getItem('armor');
 };
 
-Client.setWeapon = function (key) {
+Client.setWeapon = function setWeapon(key) {
   localStorage.setItem('weapon', key);
 };
 
-Client.getWeapon = function () {
+Client.getWeapon = function getWeapon() {
   return localStorage.getItem('weapon');
 };
 
-Client.setName = function (name) {
+Client.setName = function setName(name) {
   localStorage.setItem('name', name);
 };
 
-Client.getName = function () {
+Client.getName = function getName() {
   return localStorage.getItem('name');
 };
 
@@ -147,7 +148,7 @@ Client.socket.on('chat', (data) => {
   Game.playerSays(data.id, data.txt);
 });
 
-Client.sendPath = function (path, action, finalOrientation) {
+Client.sendPath = function sendPath(path, action, finalOrientation) {
     // Send the path that the player intends to travel
   Client.socket.emit('path', {
     path,
@@ -156,18 +157,18 @@ Client.sendPath = function (path, action, finalOrientation) {
   });
 };
 
-Client.sendChat = function (txt) {
+Client.sendChat = function sendChat(txt) {
     // Send the text that the player wants to say
   if (!txt.length || txt.length > Game.maxChatLength) return;
   Client.socket.emit('chat', txt);
 };
 
-Client.sendRevive = function () {
+Client.sendRevive = function sendRevive() {
     // Signal the server that the player wants to respawn
   Client.socket.emit('revive');
 };
 
-Client.deletePlayer = function () {
+Client.deletePlayer = function deletePlayer() {
     // Signal the server that the player wants to delete his character
   Client.socket.emit('delete', { id: Client.getPlayerID() });
   localStorage.clear();

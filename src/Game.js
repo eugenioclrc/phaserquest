@@ -4,7 +4,7 @@
  */
 /* global Phaser */
 import EasyStar from 'easystarjs';
-import game from './entry-game';
+import game from './phaser-game';
 
 import Client from './Client';
 import Factory from './Factory';
@@ -13,6 +13,7 @@ import Item from './Item';
 import Monster from './Monster';
 import NPC from './NPC';
 import spaceMap from './spaceMap';
+import AOIutils from './AOIutils';
 
 const Game = {
   // size of the gray border of the game window
@@ -147,11 +148,14 @@ Game.create = function create() {
 Game.updateWorld = function updateWorld(data) { // data is the update package from the server
   const createdPlayers = [];
   if (data.newplayers) {
-    for (var n = 0; n < data.newplayers.length; n++) {
+    for (let n = 0; n < data.newplayers.length; n += 1) {
       Game.createPlayer(data.newplayers[n]);
       createdPlayers.push(data.newplayers[n].id);
     }
-    if (data.newplayers.length > 0) Game.sortEntities(); // Sort entitites according to y coordinate to make them render properly above each other
+    if (data.newplayers.length > 0) {
+      // Sort entitites according to y coordinate to make them render properly above each other
+      Game.sortEntities();
+    }
   }
 
     // Create new monsters and items and store them in the appropriate maps
@@ -161,7 +165,7 @@ Game.updateWorld = function updateWorld(data) { // data is the update package fr
     Game.sortEntities();
   }
 
-  for (var n = 0; n < createdPlayers.length; n++) {
+  for (let n = 0; n < createdPlayers.length; n += 1) {
     const player = Game.charactersPool[createdPlayers[n]];
     if (player.inFight) {
       player.target = Game.monstersTable[player.targetID]; // ultimately, target is object, not ID
@@ -170,28 +174,28 @@ Game.updateWorld = function updateWorld(data) { // data is the update package fr
   }
 
   if (data.disconnected) { // data.disconnected is an array of disconnected players
-    for (let i = 0; i < data.disconnected.length; i++) {
+    for (let i = 0; i < data.disconnected.length; i += 1) {
       Game.removePlayer(Game.charactersPool[data.disconnected[i]], true); // animate death
     }
   }
 
-    // data.items, data.players and data.monsters are associative arrays mapping the id's of the entities
-    // to small object indicating which properties need to be updated. The following code iterate over
-    // these objects and call the relevant update functions.
+  // data.items, data.players and data.monsters are associative arrays mapping the id's of the entities
+  // to small object indicating which properties need to be updated. The following code iterate over
+  // these objects and call the relevant update functions.
   if (data.items) Game.traverseUpdateObject(data.items, Game.itemsTable, Game.updateItem);
-    // "Status" updates ; used to update some properties that need to be set before taking any real action on the game objects
+  // "Status" updates ; used to update some properties that need to be set before taking any real action on the game objects
   if (data.players) Game.traverseUpdateObject(data.players, Game.charactersPool, Game.updatePlayerStatus);
   if (data.monsters) Game.traverseUpdateObject(data.monsters, Game.monstersTable, Game.updateMonsterStatus);
-    // "Action" updates
+  // "Action" updates
   if (data.players) Game.traverseUpdateObject(data.players, Game.charactersPool, Game.updatePlayerAction);
   if (data.monsters) Game.traverseUpdateObject(data.monsters, Game.monstersTable, Game.updateMonsterAction);
 };
 // For each element in arr, call the callback on it and store the result in the map 'table'
 Game.populateTable = function populateTable(table, arr, callback) {
-  for (let i = 0; i < arr.length; i++) {
+  for (let i = 0; i < arr.length; i += 1) {
     const data = arr[i];
-        // The callback receives the object received from the server as an argument, uses the relevant factory to create
-        // the proper sprite, and returns that sprite
+    // The callback receives the object received from the server as an argument,
+    // uses the relevant factory to create the proper sprite, and returns that sprite
     const object = callback(data);
     object.id = data.id;
     table[data.id] = object;
@@ -269,34 +273,51 @@ Game.fadeInTween = function fadeInTween(object) { // Fade-in effect used to spaw
 
 // UPDATE CODE
 
-Game.updatePlayerStatus = function updatePlayerStatus(player, info) { // info contains the updated data from the server
-  if (info.connected == false) {
+// info contains the updated data from the server
+Game.updatePlayerStatus = function updatePlayerStatus(player, info) {
+  if (info.connected === false) {
     Game.removePlayer(player, true);
     return;
   }
-  if (info.x && info.y) player.position.set(info.x * Game.map.tileWidth, info.y * Game.map.tileHeight);
+  if (info.x && info.y) {
+    player.position.set(info.x * Game.map.tileWidth, info.y * Game.map.tileHeight);
+  }
 
   if (info.aoi) { // Update the id of the AOI that the player is in
     player.aoi = info.aoi;
     if (player.isPlayer) Game.updateDisplayList();
   }
 
-  if (info.alive == false && player.alive == true) player.flagForDeath();
-  if (info.weapon) Game.updateEquipment(player, info.weapon);
-  if (info.armor) Game.updateEquipment(player, info.armor);
-  if (info.weapon || info.armor) player.idle(false); // If an equipment change has taken place, need to resume idling animation
-  if (info.targetID !== undefined) player.target = (info.targetID ? Game.monstersTable[info.targetID] : null);
+  if (info.alive === false && player.alive === true) {
+    player.flagForDeath();
+  }
+  if (info.weapon) {
+    Game.updateEquipment(player, info.weapon);
+  }
+  if (info.armor) {
+    Game.updateEquipment(player, info.armor);
+  }
+  if (info.weapon || info.armor) {
+    // If an equipment change has taken place, need to resume idling animation
+    player.idle(false);
+  }
+  if (info.targetID !== undefined) {
+    player.target = (info.targetID ? Game.monstersTable[info.targetID] : null);
+  }
 };
 
 Game.updateDisplayList = function updateDisplayList() {
-    // Whenever the player moves to a different AOI, for each player displayed in the game, check if it will still be
-    // visible from the new AOI; if not, remove it
+  // Whenever the player moves to a different AOI, for each player displayed in the game, check if it will still be
+  // visible from the new AOI; if not, remove it
   if (!Game.displayedPlayers) return;
   const adjacent = AOIutils.listAdjacentAOIs(Game.player.aoi);
   Game.displayedPlayers.forEach((pid) => {
     const p = Game.charactersPool[pid];
         // check if the AOI of player p is in the list of the AOI's adjacent to the main player
-    if (p) if (adjacent.indexOf(p.aoi) == -1) Game.removePlayer(p, false); // false: don't animate death
+    if (p && adjacent.indexOf(p.aoi) === -1) {
+      // false: don't animate death
+      Game.removePlayer(p, false);
+    }
   });
 };
 
@@ -310,10 +331,11 @@ Game.updateEquipment = function updateEquipment(player, eqID) {
   }
 };
 
-Game.updatePlayerAction = function updatePlayerAction(player, info) { // info contains the updated data from the server
-  if (info.alive == true && player.alive == false) player.respawn();
+// info contains the updated data from the server
+Game.updatePlayerAction = function updatePlayerAction(player, info) {
+  if (info.alive === true && player.alive === false) player.respawn();
   if (!player.alive) return;
-  if (info.alive == false && player.alive == true) {
+  if (info.alive === false && player.alive === true) {
     if (!player.isPlayer) { // only for other players; for self, attackAndDisplay will be used instead
       const hitter = Game.monstersTable[info.lastHitter];
       if (hitter) hitter.attack();
@@ -378,7 +400,7 @@ Game.updateSelf = function updateSelf(data) {
   }
     // data.hp is an array of "hp" objects, which contain info about hit points to display over specific targets
   if (data.hp !== undefined) {
-    for (let h = 0; h < data.hp.length; h++) {
+    for (let h = 0; h < data.hp.length; h += 1) {
       const hp = data.hp[h];
       if (hp.target == false) { // The HP should appear above the player
         if (hp.from !== undefined) {
@@ -393,17 +415,21 @@ Game.updateSelf = function updateSelf(data) {
     }
   }
   if (data.killed) { // array of monsters killed by the player since last packet
-    for (var i = 0; i < data.killed.length; i++) {
+    for (let i = 0; i < data.killed.length; i += 1) {
       const killed = Game.monstersInfo[Game.monstersIDmap[data.killed[i]]].name;
       Game.messageIn(`You killed a ${killed}!`);
       Game.handleKillAchievement(data.killed[i]);
     }
   }
   if (data.used) { // array of items used by the player since last packet
-    for (var i = 0; i < data.used.length; i++) {
+    for (let i = 0; i < data.used.length; i += 1) {
       const used = Game.itemsInfo[Game.itemsIDmap[data.used[i]]];
-      if (used.msg) Game.messageIn(used.msg);
-      if (!Game.weaponAchievement || !Game.armorAchievement) Game.handleLootAchievement(data.used[i]);
+      if (used.msg) {
+        Game.messageIn(used.msg);
+      }
+      if (!Game.weaponAchievement || !Game.armorAchievement) {
+        Game.handleLootAchievement(data.used[i]);
+      }
     }
   }
   if (data.noPick) { // boolean indicating whether the player tried to pick an inferior item
@@ -485,7 +511,7 @@ Game.moveGroupTo = function moveGroupTo(parent, group, endPos) {
       parent.moveDown(group);
     }
   } else if (diff < 0) {
-    for (diff; diff < 0; diff++) {
+    for (diff; diff < 0; diff += 1) {
       parent.moveUp(group);
     }
   }
@@ -555,8 +581,8 @@ Game.makeAchievementsScroll = function makeAchievementsScroll() { // Create the 
   let page = 0;
     // Create one "holder" per achievement, consisting in a background image, the name and the description
   Game.achievementsBg.holders = [];
-  for (let i = 0; i < Game.nbAchievements; i++) {
-    if (i > 0 && i % perPage == 0) page++;
+  for (let i = 0; i < Game.nbAchievements; i += 1) {
+    if (i > 0 && i % perPage == 0) page += 1;
     Game.achievementsBg.holders.push(Game.achievementsBg.addChild(game.add.sprite(40 + (page * Game.achievementsHolderWidth), 50 + ((i % 4) * 62), 'atlas1', 'achievementholder')));
     Game.achievementsBg.holders[i].addChild(game.add.text(75, 13, achievements[i].name, nameStyle));
     Game.achievementsBg.holders[i].addChild(game.add.text(295, 15, achievements[i].desc, descStyle));
@@ -733,9 +759,9 @@ Game.updateAchievements = function updateAchievements() {
   if (!Game.achievementsBg) Game.makeAchievementsScroll();
   const achievements = Game.db.achievements;
   let completed = 0;
-  for (let i = 0; i < Game.nbAchievements; i++) {
+  for (let i = 0; i < Game.nbAchievements; i += 1) {
     const owned = Client.hasAchievement(i);
-    if (owned) completed++;
+    if (owned) completed += 1;
     if (owned) {
       Game.achievementsBg.holders[i].addChild(game.add.sprite(0, 0, 'atlas1', `tokens_${achievements[i].token}`));
       Game.achievementsBg.holders[i].getChildAt(0).addColor('#f4d442', 0);
@@ -749,7 +775,7 @@ Game.changeAchievementsPage = function changeAchievementsPage(dir) {
   if (dir == 'right' && Game.currentAchievementsPage == Game.maxAchievementsPage) return;
   if (dir == 'left' && Game.currentAchievementsPage == Game.minAchievementsPage) return;
   const sign = (dir == 'right' ? -1 : 1);
-  for (let i = 0; i < Game.achievementsBg.holders.length; i++) {
+  for (let i = 0; i < Game.achievementsBg.holders.length; i += 1) {
     const holder = Game.achievementsBg.holders[i];
     const tween = game.add.tween(holder);
     tween.to({ x: holder.x + (sign * Game.achievementsHolderWidth) }, Phaser.Timer.SECOND * 0.4);
@@ -760,12 +786,12 @@ Game.changeAchievementsPage = function changeAchievementsPage(dir) {
 };
 
 Game.updateAchievementsArrows = function updateAchievementsArrows() {
-  if (Game.currentAchievementsPage == Game.maxAchievementsPage) {
+  if (Game.currentAchievementsPage === Game.maxAchievementsPage) {
     Game.achievementsBg.rightArrow.setFrames('arrows_1', 'arrows_1', 'arrows_1');
   } else {
     Game.achievementsBg.rightArrow.setFrames('arrows_3', 'arrows_3', 'arrows_5');
   }
-  if (Game.currentAchievementsPage == Game.minAchievementsPage) {
+  if (Game.currentAchievementsPage === Game.minAchievementsPage) {
     Game.achievementsBg.leftArrow.setFrames('arrows_0', 'arrows_0', 'arrows_0');
   } else {
     Game.achievementsBg.leftArrow.setFrames('arrows_2', 'arrows_2', 'arrows_4');
@@ -779,10 +805,10 @@ Game.updateAchievementsArrows = function updateAchievementsArrows() {
 Game.handleLootAchievement = function handleLootAchievement(id) { // item id
   const item = Game.itemsInfo[Game.itemsIDmap[id]];
   if (item.type !== undefined) {
-    if (item.type == 1 && !Game.weaponAchievement) {
+    if (item.type === 1 && !Game.weaponAchievement) {
       Game.getAchievement(0);
       Game.weaponAchievement = true;
-    } else if (item.type == 2 && !Game.armorAchievement) {
+    } else if (item.type === 2 && !Game.armorAchievement) {
       Game.getAchievement(4);
       Game.armorAchievement = true;
     }
@@ -797,7 +823,7 @@ Game.handleSpeakAchievement = function handleSpeakAchievement() {
 Game.handleKillAchievement = function handleKillAchievement(id) { // monster id
   let nbKilled = localStorage.getItem(`killed_${id}`);
   if (nbKilled === undefined) nbKilled = 0;
-  nbKilled++;
+  nbKilled += 1;
   localStorage.setItem(`killed_${id}`, nbKilled);
   const aid = Game.monstersInfo[Game.monstersIDmap[id]].achievement;
   if (Game.db.achievements[aid] && nbKilled >= Game.db.achievements[aid].nb && !Client.hasAchievement(aid)) Game.getAchievement(aid);
@@ -971,7 +997,7 @@ Game.addSounds = function addSounds() {
 // Sets up basic, single-orientation animations for scenic animated sprites
 Game.basicAnimation = function basicAnimation(sprite) { // sprite is the sprite to which the animation should be applied
   const frames = [];
-  for (let m = 0; m < sprite.nbFrames; m++) { // Generate the list of frames of the animations based on the initial frame and the total number of frames
+  for (let m = 0; m < sprite.nbFrames; m += 1) { // Generate the list of frames of the animations based on the initial frame and the total number of frames
     frames.push(sprite.frame + m);
   }
   sprite.animations.add('idle', frames, sprite.rate, true);
@@ -1004,7 +1030,7 @@ Game.displayHUD = function displayHUD() {
 
   Game.HUDmessage = null;
   Game.messages = game.add.group();
-  for (let m = 0; m < 4; m++) {
+  for (let m = 0; m < 4; m += 1) {
     Game.messages.add(game.add.text(490, Game.barY + 5, '', {
       font: '16px pixel',
       fill: '#eeeeee',
@@ -1221,7 +1247,7 @@ Game.displayMap = function displayMap() {
   Game.map = game.add.tilemap('map');
   Game.map.addTilesetImage('tilesheet', 'tileset');
   Game.map.gameLayers = [];
-  for (let i = 0; i < Game.map.layers.length; i++) {
+  for (let i = 0; i < Game.map.layers.length; i += 1) {
     const group = (i <= Game.nbGroundLayers - 1 ? Game.groundMapLayers : Game.highMapLayers);
     Game.map.gameLayers[i] = Game.map.createLayer(Game.map.layers[i].name, 0, 0, group);
     Game.map.gameLayers[i].visible = false; // Make map invisible before the game has fully loaded
@@ -1244,16 +1270,16 @@ Game.displayMap = function displayMap() {
 Game.createCollisionArray = function createCollisionArray() {
     // Create the grid used for pathfinding ; it consists in a 2D array of 0's and 1's, 1's indicating collisions
   Game.collisionArray = [];
-  for (let y = 0; y < Game.map.height; y++) {
+  for (let y = 0; y < Game.map.height; y += 1) {
     const col = [];
-    for (let x = 0; x < Game.map.width; x++) {
+    for (let x = 0; x < Game.map.width; x += 1) {
       let collide = false;
-      for (let l = 0; l < Game.map.gameLayers.length; l++) {
+      for (let l = 0; l < Game.map.gameLayers.length; l += 1) {
         const tile = Game.map.getTile(x, y, Game.map.gameLayers[l]);
         if (tile) {
-                    // The original BrowserQuest Tiled file doesn't use a collision layer; rather, properties are added to the
-                    // tileset to indicate which tiles causes collisions or not. Which is why we have to check in the tileProperties
-                    // if a given tile has the property "c" or not (= collision)
+          // The original BrowserQuest Tiled file doesn't use a collision layer; rather, properties are added to the
+          // tileset to indicate which tiles causes collisions or not. Which is why we have to check in the tileProperties
+          // if a given tile has the property "c" or not (= collision)
           const tileProperties = Game.map.tileset.tileProperties[tile.index - Game.map.tileset.gid];
           if (tileProperties) {
             if (tileProperties.hasOwnProperty('c')) {
@@ -1274,7 +1300,7 @@ Game.createCollisionArray = function createCollisionArray() {
 
 Game.createDoorsMap = function createDoorsMap() { // Create the associative array mapping coordinates to doors/teleports
   Game.doors = new spaceMap();
-  for (let d = 0; d < Game.map.objects.doors.length; d++) {
+  for (let d = 0; d < Game.map.objects.doors.length; d += 1) {
     const door = Game.map.objects.doors[d];
     const position = Game.computeTileCoords(door.x, door.y);
     Game.doors.add(position.x, position.y, {
@@ -1294,7 +1320,7 @@ Game.createDoorsMap = function createDoorsMap() { // Create the associative arra
 Game.displayScenery = function displayScenery() {
   const scenery = Game.db.scenery.scenery;
   Game.groundMapLayers.forEach((layer) => {
-    for (let k = 0; k < scenery.length; k++) {
+    for (let k = 0; k < scenery.length; k += 1) {
       Game.map.createFromTiles(Game.map.tileset.gid + scenery[k].id, -1, // tile id, replacemet
                 'tileset', layer, // key of new sprite, layer
                 Game.scenery, // group added to
@@ -1311,7 +1337,7 @@ Game.displayScenery = function displayScenery() {
 
 Game.displayNPC = function displayNPC() {
   const entities = game.cache.getJSON('entities'); // mapping from object IDs to sprites, the sprites being keys for the appropriate json file
-  for (let e = 0; e < Game.map.objects.entities.length; e++) {
+  for (let e = 0; e < Game.map.objects.entities.length; e += 1) {
     const object = Game.map.objects.entities[e];
     if (!entities.hasOwnProperty(object.gid - 1961)) continue; // 1961 is the starting ID of the npc tiles in the map ; this follows from how the map was made in the original BrowserQuest
     const entityInfo = entities[object.gid - 1961];
@@ -1346,7 +1372,7 @@ Game.handleCharClick = function handleCharClick(character) { // Handles what hap
   if (Game.handleClick()) {
         // character is the sprite that was clicked
     const end = Game.computeTileCoords(character.x, character.y);
-    end.y++; // So that the player walks to place himself in front of the NPC
+    end.y += 1; // So that the player walks to place himself in front of the NPC
         // NPC id to keep track of the last line said to the player by each NPC; since there can be multiple identical NPC
         // (e.g. the guards), the NPC ids won't do ; however, since there can be only one NPC at a given location, some
         // basic "hash" of its coordinates makes for a unique id, as follow
@@ -1477,7 +1503,7 @@ const colorsDict = {
 
 Game.makeHPtexts = function makeHPtexts() { // Create a pool of HP texts to (re)use when needed during the game
   Game.HPGroup = game.add.group();
-  for (let b = 0; b < 60; b++) {
+  for (let b = 0; b < 60; b += 1) {
     Game.HPGroup.add(game.add.text(0, 0, '', {
       font: '20px pixel',
       strokeThickness: 2,
@@ -1564,20 +1590,20 @@ Game.update = function update() { // Main update loop of the client
     if (Game.marker.visible) { // Check if the tile below the marker is collidable or not, and updae the marker accordingly
             // var tiles = [];
       let collide = false;
-      for (let l = 0; l < Game.map.gameLayers.length; l++) {
+      for (let l = 0; l < Game.map.gameLayers.length; l += 1) {
         const tile = Game.map.getTile(cell.x, cell.y, Game.map.gameLayers[l]);
         if (tile) {
                     // tiles.push(tile.index);
           const tileProperties = Game.map.tileset.tileProperties[tile.index - Game.map.tileset.gid];
           if (tileProperties) {
-            if (tileProperties.hasOwnProperty('c')) {
+            if (typeof tileProperties.c !== 'undefined') {
               collide = true;
               break;
             }
           }
         }
       }
-            // console.log(tiles);
+      // console.log(tiles);
 
       Game.updateMarker(Game.markerPosition.x, Game.markerPosition.y, collide);
       Game.previousMarkerPosition.set(Game.markerPosition.x, Game.markerPosition.y);

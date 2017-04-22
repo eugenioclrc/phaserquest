@@ -9,6 +9,8 @@ import game from './phaser-game';
 export default class Monster extends Being {
   constructor(x, y, key) {
     super(x, y, key);
+    this.types.push('Monster');
+    this.typeObject = 'Monster';
     // key is a string indicating the atlas to use for the texture
     this.isPlayer = false;
     this.addChild(game.add.sprite(0, 0, 'atlas1', 'shadow'));

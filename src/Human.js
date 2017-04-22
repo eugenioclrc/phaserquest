@@ -8,7 +8,12 @@ import Game from './Game';
 export default class Human extends Being {
   // Child of Being, parent of NPC and Player (the common aspect being the handling of speech bubbles)
   // key is a string indicating the atlas to use as texture
-  
+  constructor(x, y, key) {
+    super(x, y, key);
+    this.types.push('Human');
+    this.typeObject = 'Human';
+  }
+
   generateBubble() {
     this.bubble = Game.makeBubble();
     this.bubble.alpha = 0.6;

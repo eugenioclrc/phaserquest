@@ -6,7 +6,7 @@
  * E-mail: jerome.renaux@gmail.com
  */
 /* global Phaser */
-import game from './entry-game';
+import game from './phaser-game';
 import Game from './Game';
 
 // used to map the orientation of the player, stored as a number, to the actual
@@ -35,7 +35,9 @@ Phaser.Sprite.prototype.absorbProperties = function absorbProperties(object) {
 // NPC or monsters (not items)
 export default class Being extends Phaser.Sprite {
   constructor(x, y, key) {
-    super(x, y, key);
+    super(game, x, y, key);
+    this.types = ['Being'];
+    this.typeObject = 'Being';
     // key is the string indicating which atlas to use
     // Call to constructor of parent
     this.speed = 0;
