@@ -46,8 +46,6 @@ export default class Being extends Phaser.Sprite {
   }
 
   setAnimations(object) {
-  const Monster = require('./Monster').default;
-
   // object is the sprite to animate
   // Players and monsters have a bunch of similar needs in terms of animations:
   // - Moving in all 4 directions
@@ -63,7 +61,7 @@ export default class Being extends Phaser.Sprite {
       frames = this.defaultFrames;
       framePrefix = this.weapon.name;
     } else {
-      framePrefix = (object instanceof Monster ? this.monsterName : this.armorName);
+      framePrefix = (object.typeObject === 'Monster' ? this.monsterName : this.armorName);
     }
     const rates = { // Rates of the different kinds of animations
       '': 8,
