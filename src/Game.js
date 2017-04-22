@@ -12,6 +12,7 @@ import Player from './Player';
 import Item from './Item';
 import Monster from './Monster';
 import NPC from './NPC';
+import Home from './Home';
 import spaceMap from './spaceMap';
 import AOIutils from './AOIutils';
 
@@ -1094,9 +1095,10 @@ Game.displayChatBar = function displayChatBar() {
     Game.chatBar.visible = false;
   }, this);
   Game.chatBar.upTween.onComplete.add(() => {
-    Game.chatInput.focusOutOnEnter = true;
+    // Game.chatInput.focusOutOnEnter = true;
   }, this);
-  Game.chatInput = Game.HUD.add(game.add.inputField(115, Game.barY - 20, {
+
+  /*Game.chatInput = Game.HUD.add(game.add.inputField(115, Game.barY - 20, {
     width: 750,
     height: 18,
     fillAlpha: 0,
@@ -1104,10 +1106,11 @@ Game.displayChatBar = function displayChatBar() {
     fill: '#fff',
     font: '14px pixel',
     max: Game.maxChatLength,
+    placeHolder: '',
   }));
   Game.chatInput.visible = false;
   Game.chatInput.focusOutOnEnter = false;
-  Game.chatInput.input.useHandCursor = false;
+  Game.chatInput.input.useHandCursor = false;*/
 };
 
 Game.displayAchievementDock = function displayAchievementDock() {
@@ -1212,22 +1215,22 @@ Game.toggleChat = function toggleChat() { // Toggles the visibility of the chat 
   if (Game.chatBar.visible) { // Hide bar
     Game.chatButton.frameName = 'talkicon_0';
     Game.chatButton.freezeFrames = false;
-    Game.chatInput.focusOutOnEnter = false;
-    Game.chatInput.visible = false;
-    Game.chatInput.endFocus();
+    // Game.chatInput.focusOutOnEnter = false;
+    // Game.chatInput.visible = false;
+    // Game.chatInput.endFocus();
     Game.chatBar.downTween.start();
-    if (Game.chatInput.text.text) { // If a text has been typed, send it
+    /*if (Game.chatInput.text.text) { // If a text has been typed, send it
       const txt = Game.chatInput.text.text;
       Game.player.displayBubble(txt);
       Client.sendChat(txt);
     }
-    Game.chatInput.resetText();
+    Game.chatInput.resetText();*/
   } else { // Show bar
     Game.chatButton.frameName = 'talkicon_2';
     Game.chatButton.freezeFrames = true;
     Game.chatBar.visible = true;
-    Game.chatInput.visible = true;
-    Game.chatInput.startFocus();
+    //Game.chatInput.visible = true;
+    //Game.chatInput.startFocus();
     Game.chatBar.upTween.start();
   }
 };
@@ -1579,7 +1582,7 @@ Game.update = function update() { // Main update loop of the client
   Game.markerPosition.x = cell.x * Game.map.tileWidth;
   Game.markerPosition.y = cell.y * Game.map.tileWidth;
 
-  if (Game.chatInput.visible && !Game.chatInput.focus) Game.toggleChat(); // Trick to make the chat react to pressing "enter"
+  // if (Game.chatInput.visible && !Game.chatInput.focus) Game.toggleChat(); // Trick to make the chat react to pressing "enter"
 
   if (Game.player.hasMoved()) Game.checkCameraBounds();
 

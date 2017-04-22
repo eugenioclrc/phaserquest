@@ -8,6 +8,8 @@
 /* global Phaser */
 import game from './phaser-game';
 import Game from './Game';
+import Client from './Client';
+import Player from './Player';
 
 // used to map the orientation of the player, stored as a number, to the actual
 // name of the orientation

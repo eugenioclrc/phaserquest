@@ -4,6 +4,7 @@
 /* global Phaser */
 import Human from './Human';
 import Game from './Game';
+import game from './phaser-game';
 import Client from './Client';
 
 export default class Player extends Human {
