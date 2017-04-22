@@ -3,7 +3,7 @@
  */
 
 const GameServer = require('./GameServer.js').GameServer;
-const MovingEntity = require('./MovingEntity.js').MovingEntity; // Parent class of monsters and players
+const MovingEntity = require('./MovingEntity.js'); // Parent class of monsters and players
 
 class Monster extends MovingEntity {
   constructor(x, y, monster) {

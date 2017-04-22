@@ -3,8 +3,9 @@
  */
 
 const GameServer = require('./GameServer.js').GameServer;
-const MovingEntity = require('./MovingEntity.js').MovingEntity; // Parent class of monsters and players
-const PersonalUpdatePacket = require('./PersonalUpdatePacket.js').PersonalUpdatePacket;
+// Parent class of monsters and players
+const MovingEntity = require('./MovingEntity.js');
+const PersonalUpdatePacket = require('./PersonalUpdatePacket.js');
 
 class Player extends MovingEntity {
   constructor(name) {
@@ -54,8 +55,8 @@ class Player extends MovingEntity {
     for (let p = 0; p < broadcastProperties.length; p++) {
       trimmed[broadcastProperties[p]] = this[broadcastProperties[p]];
     }
-    trimmed.x = parseInt(this.x);
-    trimmed.y = parseInt(this.y);
+    trimmed.x = parseInt(this.x, 10);
+    trimmed.y = parseInt(this.y, 10);
     if (this.route) trimmed.route = this.route.trim(this.category);
     if (this.target) trimmed.targetID = this.target.id;
     return trimmed;
@@ -64,8 +65,9 @@ class Player extends MovingEntity {
   dbTrim() {
     // Return a smaller object, containing a subset of the initial properties, to be stored in the database
     const trimmed = {};
-    const dbProperties = ['x', 'y', 'name']; // list of properties relevant to store in the database
-    for (let p = 0; p < dbProperties.length; p++) {
+    // list of properties relevant to store in the database
+    const dbProperties = ['x', 'y', 'name'];
+    for (let p = 0; p < dbProperties.length; p += 1) {
       trimmed[dbProperties[p]] = this[dbProperties[p]];
     }
     trimmed.weapon = GameServer.db.itemsIDmap[this.weapon];
@@ -93,7 +95,10 @@ class Player extends MovingEntity {
   }
 
   getPathEnd() {
-    return { x: this.route.path[this.route.path.length - 1].x, y: this.route.path[this.route.path.length - 1].y };
+    return {
+      x: this.route.path[this.route.path.length - 1].x,
+      y: this.route.path[this.route.path.length - 1].y,
+    };
   }
 
   updateFight() {
@@ -133,12 +138,12 @@ class Player extends MovingEntity {
     } else if (itemInfo.equip) {
       const equipInfo = GameServer.db.items[itemInfo.equip];
       const type = equipInfo.type;
-      if (type == 1) { // Weapon
+      if (type === 1) { // Weapon
         if (this.atk >= equipInfo.atk) { // don't pick up if a better item is already equipped
           this.updatePacket.addNoPick();
           picked = false;
         }
-      } else if (type == 2) { // Armor
+      } else if (type === 2) { // Armor
         if (this.def >= equipInfo.def) {
           this.updatePacket.addNoPick();
           picked = false;

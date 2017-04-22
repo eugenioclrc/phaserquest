@@ -1,6 +1,9 @@
+/* eslint-disable */
 /**
  * Created by Jerome on 25-02-17.
  */
+
+import Human from './Human';
 
 function NPC(x,y,key){
     // key is a string use as a key in Game.npcInfo to fetch the necessary information about the NPC to create

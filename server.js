@@ -40,13 +40,34 @@ const Encoder = require('./js/server/Encoder.js');
 server.enableBinary = true;
 gs.server = server;
 
+let indexHTML = false;
+const isProd = process.env.NODE_ENV === 'production';
+if (isProd) {
+  // in production: create server renderer and index HTML from real fs
+  // renderer = createRenderer(fs.readFileSync(resolve('./dist/server-bundle.js'), 'utf-8'))
+  // indexHTML = parseIndex(fs.readFileSync(resolve('./dist/index.html'), 'utf-8'))
+} else {
+  // in development: setup the dev server with watch and hot-reload,
+  // and update renderer / index HTML on file change.
+  require('./build/setup-dev-server.js')(app, {
+    bundleUpdated: bundle => {
+      // renderer = createRenderer(bundle)
+    },
+    indexUpdated: index => {
+      indexHTML = index;
+      // indexHTML = parseIndex(index)
+    }
+  })
+}
+
+
 app.use('/css', express.static(`${__dirname}/css`));
 app.use('/js', express.static(`${__dirname}/js`));
 app.use('/assets', express.static(`${__dirname}/assets`));
 
 
 app.get('/', (req, res) => {
-  res.sendFile(`${__dirname}/index.html`);
+  res.send(indexHTML);
 });
 
 /* app.get('/format',function(req,res){

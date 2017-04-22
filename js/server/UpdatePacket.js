@@ -17,21 +17,16 @@ class UpdatePacket {
   }
 
   addObject(object) {
-    let arr;
-    switch (object.category) {
-      case 'player':
-        arr = this.newplayers;
-        break;
-      case 'item':
-        arr = this.newitems;
-        break;
-      case 'monster':
-        arr = this.newmonsters;
-        break;
-    }
-    // Check that the object to insert is not already present (possible since when pulling updates from neighboring AOIs)
-    for (let i = 0; i < arr.length; i++) {
-      if (arr[i].id == object.id) return;
+    const switchCategory = {
+      player: this.newplayers,
+      item: this.newitems,
+      monster: this.newmonsters,
+    };
+    const arr = switchCategory[object.category];
+    // Check that the object to insert is not already present (possible since
+    // when pulling updates from neighboring AOIs)
+    for (let i = 0; i < arr.length; i += 1) {
+      if (arr[i].id === object.id) return;
     }
     arr.push(object.trim());
   }
@@ -41,25 +36,23 @@ class UpdatePacket {
   }
 
   updateRoute(type, entityID, route) {
-    const map = (type == 'player' ? this.players : this.monsters);
-    if (!map.hasOwnProperty(entityID)) map[entityID] = {};
+    const map = (type === 'player' ? this.players : this.monsters);
+    if (!map[entityID]) {
+      map[entityID] = {};
+    }
     map[entityID].route = route;
   }
 
   updateProperty(type, id, property, value) {
     // console.log('updating property type = '+type+', id = '+id+', prop = '+property+', val = '+value);
-    let map;
-    switch (type) {
-      case 'item':
-        map = this.items;
-        break;
-      case 'player':
-        map = this.players;
-        break;
-      case 'monster':
-        map = this.monsters;
-        break;
-    }
+    const mapType = {
+      item: this.items,
+      player: this.players,
+      monster: this.monsters,
+    };
+
+    const map = mapType[type];
+
     if (!map[id]) {
       map[id] = {};
     }
@@ -81,10 +74,12 @@ class UpdatePacket {
     let i = this.newplayers.length;
     while (i--) {
       const n = this.newplayers[i];
-      if (n.id === playerID) { // if the newplayer is the target player of the update packet, info is echo, removed
+      // if the newplayer is the target player of the update packet, info is echo, removed
+      if (n.id === playerID) {
         this.newplayers.splice(i, 1);
-      } else { // Otherwise, check for redundancies between player and newplayer objects and remove them
-        for (let j = 0; j < Object.keys(this.players).length; j+=1) {
+      } else {
+        // Otherwise, check for redundancies between player and newplayer objects and remove them
+        for (let j = 0; j < Object.keys(this.players).length; j += 1) {
           const key = Object.keys(this.players)[j];
           if (n.id === key) {
             delete this.players[Object.keys(this.players)[j]];
@@ -95,8 +90,9 @@ class UpdatePacket {
   }
 // Get updates about all entities present in the list of AOIs
   synchronize(AOI) {
-    for (let i = 0; i < AOI.entities.length; i+=1) {
-      this.addObject(AOI.entities[i]); // don't send the trimmed version, the trim is done in adObject()
+    for (let i = 0; i < AOI.entities.length; i += 1) {
+      // don't send the trimmed version, the trim is done in adObject()
+      this.addObject(AOI.entities[i]);
     }
   }
 
@@ -122,4 +118,4 @@ class UpdatePacket {
     return this;
   }
 }
-module.exports.UpdatePacket = UpdatePacket;
+module.exports = UpdatePacket;

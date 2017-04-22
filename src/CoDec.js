@@ -1,18 +1,10 @@
-// This class contains information about the expected structure of the
-// different objects that can be transmitted
+// This class contains information about the expected structure of the different objects that can be transmitted
 // between the client and the server, in order to guide the encoding/decoding process
 const CoDec = {
-  // How many bytes to encode a character of a string
-  bytesPerChar: 1,
-  // How many bytes to encode numerical id's (a maximum id of 2^16 = 65536 seems
-  // reasonable for a small game, "real" games should use at least 3 bytes)
-  bytesPerID: 2,
-  // How many bytes to use to represent booleans (= 8 booleans per byte allocated),
-  booleanBytes: 1,
-  // How many bytes to encode timestamp (a timestamp takes more room than 4 bytes,
-  // but only the last 4 bytes are relevant, since the time spans incoded in the
-  // remaining ones are too big to be useful)
-  stampBytes: 4,
+  bytesPerChar: 1, // How many bytes to encode a character of a string
+  bytesPerID: 2, // How many bytes to encode numerical id's (a maximum id of 2^16 = 65536 seems reasonable for a small game, "real" games should use at least 3 bytes)
+  booleanBytes: 1, // How many bytes to use to represent booleans (= 8 booleans per byte allocated),
+  stampBytes: 4, // How many bytes to encode timestamp (a timestamp takes more room than 4 bytes, but only the last 4 bytes are relevant, since the time spans incoded in the remaining ones are too big to be useful)
 };
 
 CoDec.int16schema = {
@@ -95,9 +87,7 @@ CoDec.monsterSchema = {
   },
 };
 CoDec.globalUpdateSchema = {
-  // How many bytes to use to indicate the presence/absence of fields in the
-  // object; Limits the number of encodable fields to 8*propertiesBytes
-  propertiesBytes: 1,
+  propertiesBytes: 1, // How many bytes to use to indicate the presence/absence of fields in the object; Limits the number of encodable fields to 8*propertiesBytes
   arrays: {
     newplayers: CoDec.playerSchema,
     newitems: CoDec.itemSchema,
@@ -161,4 +151,4 @@ CoDec.initializationSchema = {
   },
 };
 
-module.exports.CoDec = CoDec;
+export default CoDec;

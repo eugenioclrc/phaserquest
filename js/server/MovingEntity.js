@@ -170,4 +170,4 @@ class MovingEntity extends GameObject {
   }
 }
 
-module.exports.MovingEntity = MovingEntity;
+module.exports = MovingEntity;

@@ -4,23 +4,29 @@
 
 class PersonalUpdatePacket {
   constructor() {
-    this.hp = []; // list of hp values to display as the result of fight actions between the player and enemies
-    this.killed = []; // list of id's of monsters killed since last update
-    this.used = []; // list of id's of items used/picked since last update
+    // list of hp values to display as the result of fight actions between the player and enemies
+    this.hp = [];
+    // list of id's of monsters killed since last update
+    this.killed = [];
+    // list of id's of items used/picked since last update
+    this.used = [];
   }
 
   isEmpty() {
-    if (this.life !== undefined) return false; // current value of the health of the player
+    // current value of the health of the player
+    if (this.life !== undefined) return false;
     if (this.x !== undefined) return false;
     if (this.y !== undefined) return false;
-    if (this.noPick !== undefined) return false; // boolean ; need to send a message about an item not being picked or not
+    // boolean ; need to send a message about an item not being picked or not
+    if (this.noPick !== undefined) return false;
     if (this.hp.length > 0) return false;
     if (this.killed.length > 0) return false;
     if (this.used.length > 0) return false;
     return true;
   }
 
-  clean() { // Remove empty arrays from the package
+  clean() {
+    // Remove empty arrays from the package
     if (!this.hp.length) delete this.hp;
     if (!this.killed.length) delete this.killed;
     if (!this.used.length) delete this.used;
@@ -54,4 +60,4 @@ class PersonalUpdatePacket {
   }
 }
 
-module.exports.PersonalUpdatePacket = PersonalUpdatePacket;
+module.exports = PersonalUpdatePacket;

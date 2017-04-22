@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Phaser Quest</title>
+    <style>
+        body {
+            background:-webkit-gradient(radial, center center, 0, center center, 1200, from(rgba(0,0,0,0)), to(rgba(0,0,0,1))), url('/assets/sprites/wood.png') repeat, #000;
+            margin: 0;
+        }
+        #game {
+            cursor: url('/assets/sprites/hand.png'), auto;
+            max-width: 980px;
+            max-height: 500px;
+            margin-left: auto;
+            margin-right: auto;
+            padding: 0;
+        }
+        @font-face {
+            font-family: 'pixel';
+            src: url('/assets/fonts/advocut-webfont.ttf');
+        }
+        .fontPreload {
+            font-family: 'pixel';
+            position: absolute;
+            left: -100px;
+        }
+    </style>
+</head>
+<body>
+    <div class="fontPreload">.</div> <!-- don't forget the dot, the div cannot be empty-->
+    <div id='game'></div>
+    <!-- APP -->
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/phaser/2.6.2/phaser.min.js"></script>
+    <script src="/js/phaser-input.js"></script>
+</body>
