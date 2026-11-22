@@ -1,5 +1,6 @@
 import { ArraySchema, schema, t, type SchemaType } from '@colyseus/schema';
-import type { Tile } from '../../shared/WorldProtocol.ts';
+import type GameObject = require('./GameObject.ts');
+import type Player = require('./Player.ts');
 
 const Position = schema({ x: t.uint16(), y: t.uint16() }, 'Position');
 const PlayerState = schema({
@@ -71,28 +72,7 @@ export type MonsterState = SchemaType<typeof MonsterState>;
 export type ItemState = SchemaType<typeof ItemState>;
 export type VisibleEntity = PlayerState | MonsterState | ItemState;
 
-export interface PlayerEntity extends Tile {
-  category: 'player';
-  id: number;
-  name: string;
-  aoi: number;
-  armor: number;
-  weapon: number;
-  alive: boolean;
-  inFight: boolean;
-  life: number;
-  lastDoor?: Tile;
-  inWorld: boolean;
-  target?: { id: number };
-  routeVersion: number;
-  route?: {
-    path: Tile[];
-    orientation?: number;
-    departureTime: number;
-  };
-}
-
-function syncPlayer(state: WorldState, player: PlayerEntity) {
+function syncPlayer(state: WorldState, player: Player) {
   const key = String(player.id);
   const row = state.players.get(key) ?? new PlayerState();
   const route = player.route;
@@ -125,42 +105,16 @@ function syncPlayer(state: WorldState, player: PlayerEntity) {
   if (!state.players.has(key)) state.players.set(key, row);
 }
 
-interface MonsterEntity extends Tile {
-  category: 'monster';
-  id: number;
-  monster: number;
-  alive: boolean;
-  inFight: boolean;
-  inWorld: boolean;
-  target?: { id: number };
-  lastHitter?: number | { id: number };
-  routeVersion: number;
-  route?: { path: Tile[]; delta: number };
-}
-
-interface ItemEntity extends Tile {
-  category: 'item';
-  id: number;
-  itemID: number;
-  visible: boolean;
-  respawn: boolean;
-  chest: boolean;
-  inChest: boolean;
-  loot: boolean;
-  inWorld: boolean;
-}
-
-export type WorldEntity = PlayerEntity | MonsterEntity | ItemEntity;
 export const entityCollection = { player: 'players', monster: 'monsters', item: 'items' } as const;
 
-export function syncEntity(state: WorldState, entity: WorldEntity) {
-  if (entity.category === 'player') {
+export function syncEntity(state: WorldState, entity: GameObject) {
+  if (entity.isPlayer()) {
     syncPlayer(state, entity);
     return;
   }
 
   const key = String(entity.id);
-  if (entity.category === 'monster') {
+  if (entity.isMonster()) {
     const row = state.monsters.get(key) ?? new MonsterState();
     if (row.routeVersion !== entity.routeVersion) {
       const route = entity.route;
@@ -184,6 +138,7 @@ export function syncEntity(state: WorldState, entity: WorldEntity) {
     return;
   }
 
+  if (!entity.isItem()) return;
   const row = state.items.get(key) ?? new ItemState();
   row.assign({
     id: entity.id,

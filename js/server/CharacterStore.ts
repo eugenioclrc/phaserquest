@@ -1,30 +1,45 @@
-const { ObjectId } = require('mongodb');
+import mongo = require('mongodb');
+import type { CharacterDocument, CharacterSave } from './WorldTypes.ts';
+
+const { ObjectId } = mongo;
+
+type CharacterErrorCode = 'missing' | 'busy' | 'unavailable';
+type CharacterFilter = { _id: mongo.ObjectId };
+
+interface CharacterCollection {
+  findOne(filter: CharacterFilter): Promise<CharacterDocument | null>;
+  findOneAndUpdate(
+    filter: CharacterFilter,
+    update: { $setOnInsert: CharacterSave & CharacterFilter },
+    options: { upsert: true; returnDocument: 'after' },
+  ): Promise<CharacterDocument | null>;
+  updateOne(filter: CharacterFilter, update: { $set: CharacterSave }): Promise<{ matchedCount: number }>;
+  deleteOne(filter: CharacterFilter): Promise<{ acknowledged: boolean }>;
+}
 
 class CharacterError extends Error {
-  constructor(code, cause) {
+  constructor(readonly code: CharacterErrorCode, cause?: unknown) {
     super(code, { cause });
-    this.code = code;
   }
 }
 
-function characterId(value) {
+function characterId(value: unknown) {
   if (typeof value !== 'string' || !/^[\da-f]{24}$/i.test(value)) throw new CharacterError('missing');
   return value.toLowerCase();
 }
 
 class CharacterStore {
-  constructor(collection) {
-    this.collection = collection;
-    this.reservations = new Set();
-    this.saves = new Map();
-  }
+  private readonly reservations = new Set<string>();
+  private readonly saves = new Map<string, Promise<boolean>>();
 
-  reserve(id) {
+  constructor(private readonly collection: CharacterCollection) {}
+
+  private reserve(id: string) {
     if (this.reservations.has(id)) throw new CharacterError('busy');
     this.reservations.add(id);
   }
 
-  async create(value, save) {
+  async create(value: unknown, save: CharacterSave) {
     const id = characterId(value);
     const _id = new ObjectId(id);
     let document;
@@ -39,7 +54,7 @@ class CharacterStore {
     return id;
   }
 
-  async open(value) {
+  async open(value: unknown) {
     const id = characterId(value);
     this.reserve(id);
     let document;
@@ -54,7 +69,7 @@ class CharacterStore {
     throw new CharacterError('missing');
   }
 
-  save(id, save) {
+  save(id: string, save: CharacterSave) {
     const previous = this.saves.get(id);
     const pending = (async () => {
       await previous;
@@ -73,12 +88,12 @@ class CharacterStore {
     return pending;
   }
 
-  async close(id) {
+  async close(id: string) {
     await this.saves.get(id);
     this.reservations.delete(id);
   }
 
-  async delete(value) {
+  async delete(value: unknown) {
     const id = characterId(value);
     this.reserve(id);
     try {
@@ -93,4 +108,4 @@ class CharacterStore {
   }
 }
 
-module.exports = { CharacterStore, CharacterError, characterId };
+export = { CharacterStore, CharacterError, characterId };

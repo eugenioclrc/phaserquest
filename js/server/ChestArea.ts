@@ -4,20 +4,14 @@
 
 // Object representing a "chest area", that is, an area where a chest spawns
 // if all present monsters are killed
+import type { ChestContents } from './WorldTypes.ts';
+
 class ChestArea {
-  constructor(properties, callback) {
-    // number of monsters currently in the area
-    this.actualN = 0;
-    // total number of monsters normally in the area
-    this.maxN = 0;
-    // properties such as the coordinates of the chest and its content (read
-    // from the Tiled map)
-    this.properties = properties;
-    // an area is active only once all its monsters have respawn. Before then,
-    // killing monsters in it won't trigger the chest.
-    this.active = true;
-    this.callback = callback;
-  }
+  private actualN = 0;
+  private maxN = 0;
+  private active = true;
+
+  constructor(private readonly properties: ChestContents, private readonly callback: (properties: ChestContents) => void) {}
 
   incrementAll() {
     this.actualN += 1;
@@ -43,4 +37,4 @@ class ChestArea {
   }
 }
 
-module.exports.ChestArea = ChestArea;
+export = ChestArea;

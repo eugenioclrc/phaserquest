@@ -4,12 +4,11 @@
     "module": "Preserve",
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
-    "allowJs": true,
     "strict": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true,
     "types": ["bun"]
   },
-  "include": ["shared/**/*.ts", "src/**/*.ts", "js/**/*.ts", "test/**/*.ts"]
+  "include": ["server.ts", "shared/**/*.ts", "src/**/*.ts", "js/**/*.ts", "test/**/*.ts"]
 }

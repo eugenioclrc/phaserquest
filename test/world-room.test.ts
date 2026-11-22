@@ -8,9 +8,10 @@ import express from 'express';
 import type { Tile } from '../shared/WorldProtocol.ts';
 import { WorldRoom } from '../js/server/WorldRoom.ts';
 import { createGameServer } from '../js/server/createGameServer.ts';
-import { CharacterStore } from '../js/server/CharacterStore.js';
+import { CharacterStore } from '../js/server/CharacterStore.ts';
+import { characterCollection } from './character-collection.ts';
 
-const { GameServer } = require('../js/server/GameServer.js');
+import GameServer = require('../js/server/GameServer.ts');
 
 function ready(room: Room<WorldRoom>) {
   const position = Promise.withResolvers<Tile>();
@@ -30,12 +31,12 @@ async function localPlayer(room: Room<WorldRoom>) {
 
 test('world clients share one room, reserve characters and reconnect', async () => {
   const ids = ['100000000000000000000001', '100000000000000000000002'];
-  GameServer.characters = new CharacterStore({
+  GameServer.characters = new CharacterStore(characterCollection({
     findOne: async ({ _id }: { _id: ObjectId }) => {
       const index = ids.indexOf(_id.toString());
       return index < 0 ? null : { _id, name: 'Scout' + index, x: '30', y: String(31 + index), weapon: 'sword1', armor: 'clotharmor' };
     },
-  });
+  }));
   await GameServer.readMap();
   const http = createServer(express());
   const server = createGameServer(http, { world: defineRoom(WorldRoom) });
@@ -64,9 +65,11 @@ test('world clients share one room, reserve characters and reconnect', async () 
     expect(await chat.promise).toEqual({ id: firstPlayer, txt: 'Nearby' });
 
     const player = GameServer.getPlayer(first.sessionId);
+    if (!player) throw new Error('The first character did not enter');
     player.lastWalkUpdate = Date.now() + 5000;
     player.setRoute([{ x: 30, y: 31 }, { x: 31, y: 31 }, { x: 32, y: 31 }], Date.now(), 0, { action: 0 }, 3);
     player.x = 31;
+    if (!player.route) throw new Error('The player route was not set');
     player.route.step = 1;
     GameServer.moveAtLocation(player, 30, 31, 31, 31);
 

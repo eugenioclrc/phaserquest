@@ -2,8 +2,8 @@
 
 ## Project Structure and Module Organization
 
-- `index.html` loads the Phaser 4 client from `src/phaser4/`. `main.ts` connects the browser controls and game scene, and `connection.ts` binds Colyseus room messages and state callbacks.
-- `server.js` starts Express, Colyseus and MongoDB. `js/server/GameServer.js` runs the simulation, `WorldRoom.ts` owns the room and `CharacterStore.js` owns MongoDB saves.
+- `index.html` loads the Phaser 4 client from `src/`. `main.ts` connects the browser controls and game scene, and `connection.ts` binds Colyseus room messages and state callbacks.
+- `server.ts` starts Express, Colyseus and MongoDB. `js/server/GameServer.ts` runs the simulation, `WorldRoom.ts` owns the room and `CharacterStore.ts` owns MongoDB saves.
 - `shared/` contains game commands, area-of-interest helpers and the spatial map. Replicated Schema definitions live in `js/server/WorldState.ts`.
 - `assets/` holds maps, entity definitions, sprite atlases, tilesets, audio, and fonts. Keep generated `dist/` output out of commits.
 
@@ -21,7 +21,7 @@ For database and port overrides, see the [README](README.md). Use a separate dat
 
 ## Coding Style and Naming
 
-Use two-space indentation, single quotes, and semicolons. Use camelCase for functions and variables and PascalCase for classes and their files, such as `Player.js`. Use ES modules in `src/` and `shared/` and CommonJS in the server. The package defines no lint command.
+Use two-space indentation, single quotes, and semicolons. Use camelCase for functions and variables and PascalCase for classes and their files, such as `Player.ts`. Use ES modules in `src/` and `shared/` and CommonJS in the server. The package defines no lint command.
 
 ## Testing Guidelines
 

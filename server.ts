@@ -1,17 +1,25 @@
+import pm2 = require('@pm2/io');
+import fs = require('node:fs/promises');
+import http = require('node:http');
+import path = require('node:path');
+import util = require('node:util');
+import express = require('express');
+import mongoDriver = require('mongodb');
+import characters = require('./js/server/CharacterStore.ts');
+import gs = require('./js/server/GameServer.ts');
+import Player = require('./js/server/Player.ts');
+import type { CharacterDocument } from './js/server/WorldTypes.ts';
+import type { ViteDevServer } from 'vite';
+
 // PM2's V8 compatibility probes scan the Bun heap on each metrics refresh.
-require('@pm2/io').init({ metrics: { v8: false } });
+pm2.init({ metrics: { v8: false } });
 
-const { access } = require('node:fs/promises');
-const { createServer } = require('node:http');
-const { join } = require('node:path');
-const { parseArgs } = require('node:util');
-const express = require('express');
-const { MongoClient } = require('mongodb');
-
-const { CharacterStore, characterId } = require('./js/server/CharacterStore.js');
-const gs = require('./js/server/GameServer.js').GameServer;
-const { Player } = require('./js/server/Player.js');
-
+const { access } = fs;
+const { createServer } = http;
+const { join } = path;
+const { parseArgs } = util;
+const { MongoClient } = mongoDriver;
+const { CharacterStore, CharacterError, characterId } = characters;
 const { values: options } = parseArgs({
   options: {
     dev: { type: 'boolean' },
@@ -24,25 +32,28 @@ const app = express();
 const server = createServer(app);
 app.use('/api/characters', express.json({ limit: '4kb' }));
 app.post('/api/characters', async (req, res) => {
-  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  const body: { id?: unknown; name?: unknown } | null | undefined = req.body;
+  const name = typeof body?.name === 'string' ? body.name.trim() : '';
   if (!name || name.length > 20) return res.sendStatus(400);
   if (!gs.mapReady) return res.sendStatus(503);
   try {
-    const id = characterId(req.body.id);
-    res.json({ id: await gs.characters.create(id, new Player(name).dbTrim()) });
+    const id = characterId(body?.id);
+    res.json({ id: await gs.characters.create(id, new Player(gs, name).dbTrim()) });
   } catch (error) {
     res.sendStatus(characterStatus(error));
   }
 });
 app.post('/api/characters/delete', async (req, res) => {
   try {
-    res.json({ ok: await gs.characters.delete(req.body?.id) });
+    const body: { id?: unknown } | null | undefined = req.body;
+    res.json({ ok: await gs.characters.delete(body?.id) });
   } catch (error) {
     res.sendStatus(characterStatus(error));
   }
 });
 
-function characterStatus(error) {
+function characterStatus(error: unknown) {
+  if (!(error instanceof CharacterError)) return 503;
   if (error.code === 'missing') return 400;
   if (error.code === 'busy') return 409;
   return 503;
@@ -66,9 +77,9 @@ async function start() {
     serverSelectionTimeoutMS: 5000,
   });
   await mongo.connect();
-  gs.characters = new CharacterStore(mongo.db(process.env.MONGODB_DB || 'phaserQuest').collection('players'));
+  gs.characters = new CharacterStore(mongo.db(process.env.MONGODB_DB || 'phaserQuest').collection<CharacterDocument>('players'));
 
-  let vite;
+  let vite: ViteDevServer | undefined;
   if (options.dev) {
     const { createServer: createViteServer } = await import('vite');
     vite = await createViteServer({
@@ -90,7 +101,10 @@ async function start() {
   const host = process.env.HOST || (options.dev ? '127.0.0.1' : undefined);
   await gameServer.listen(port, host);
   await matchMaker.createRoom('world', {});
-  console.log('PhaserQuest listening at http://' + (host || 'localhost') + ':' + server.address().port);
+  const address = server.address();
+  if (address && typeof address !== 'string') {
+    console.log('PhaserQuest listening at http://' + (host || 'localhost') + ':' + address.port);
+  }
 
   let stopping = false;
   async function shutdown() {
@@ -109,6 +123,6 @@ async function start() {
 }
 
 start().catch((err) => {
-  console.error('PhaserQuest could not start.', err.message);
+  console.error('PhaserQuest could not start.', err instanceof Error ? err.message : err);
   process.exit(1);
 });

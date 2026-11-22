@@ -1,9 +1,9 @@
 import { Callbacks, Client, type Room } from '@colyseus/sdk';
-import { CharacterJoinError, type MovementCorrection } from '../../shared/WorldProtocol.ts';
+import { CharacterJoinError, type MovementCorrection } from '../shared/WorldProtocol.ts';
 import type { ItemSnapshot, MonsterSnapshot, PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
 
-import type { WorldRoom } from '../../js/server/WorldRoom.ts';
-import type { ItemState, MonsterState, PlayerState } from '../../js/server/WorldState.ts';
+import type { WorldRoom } from '../js/server/WorldRoom.ts';
+import type { ItemState, MonsterState, PlayerState } from '../js/server/WorldState.ts';
 
 function playerSnapshot(row: PlayerState, serverNow: number): PlayerSnapshot {
   const { id, name, x, y, aoi, armor, weapon, alive, inFight, targetID, routeVersion } = row;

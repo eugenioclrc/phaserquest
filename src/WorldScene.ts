@@ -1,4 +1,4 @@
-import { playerStepMs, type MovementCorrection } from '../../shared/WorldProtocol.ts';
+import { playerStepMs, type MovementCorrection } from '../shared/WorldProtocol.ts';
 import * as Phaser from 'phaser';
 import EasyStar from 'easystarjs';
 import type { ItemSnapshot, PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';

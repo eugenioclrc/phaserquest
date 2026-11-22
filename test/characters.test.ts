@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { ObjectId } from 'mongodb';
-import { CharacterStore } from '../js/server/CharacterStore.js';
+import { CharacterStore } from '../js/server/CharacterStore.ts';
+import { characterCollection } from './character-collection.ts';
 
 const id = 'abc123000000000000000001';
 const scout = { _id: new ObjectId(id), name: 'Scout', x: 40, y: 80, weapon: 'sword1', armor: 'clotharmor' };
@@ -9,11 +10,11 @@ const { _id, ...save } = scout;
 test('reserves a legacy character during load and until pending saves complete', async () => {
   const load = Promise.withResolvers<typeof scout>();
   const write = Promise.withResolvers<{ matchedCount: number }>();
-  const store = new CharacterStore({
+  const store = new CharacterStore(characterCollection({
     findOne: () => load.promise,
     updateOne: () => write.promise,
     deleteOne: async () => ({ acknowledged: true }),
-  });
+  }));
 
   const opening = store.open(id);
   await expect(store.open(id.toUpperCase())).rejects.toMatchObject({ code: 'busy' });
@@ -35,7 +36,7 @@ test('reserves a legacy character during load and until pending saves complete',
 test('retries creation with the same ID and distinguishes unavailable from missing', async () => {
   let document: typeof scout | null = null;
   let unavailable = false;
-  const store = new CharacterStore({
+  const store = new CharacterStore(characterCollection({
     findOneAndUpdate: async (_filter: unknown, update: { $setOnInsert: typeof scout }) => document ??= update.$setOnInsert,
     findOne: async () => {
       if (unavailable) throw Error('database offline');
@@ -45,7 +46,7 @@ test('retries creation with the same ID and distinguishes unavailable from missi
       document = null;
       return { acknowledged: true };
     },
-  });
+  }));
   expect(await store.create(id, save)).toBe(id);
   expect(await store.create(id, { ...save, x: 30 })).toBe(id);
   expect(document as typeof scout | null).toEqual(scout);

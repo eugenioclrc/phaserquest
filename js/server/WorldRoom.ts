@@ -1,17 +1,19 @@
 import { Room, type Client } from '@colyseus/core';
 import { StateView } from '@colyseus/schema';
 import { AOIutils } from '../../shared/AOIutils.ts';
-import { CharacterJoinError, type PathCommand, type PlayerEvents, type Tile } from '../../shared/WorldProtocol.ts';
+import { CharacterJoinError, type PathCommand } from '../../shared/WorldProtocol.ts';
 import {
   SelfState, WorldState, entityCollection, syncEntity,
-  type PlayerEntity, type VisibleEntity, type WorldEntity,
+  type VisibleEntity,
 } from './WorldState.ts';
 
-const { GameServer } = require('./GameServer.js');
+import GameServer = require('./GameServer.ts');
+import type GameObject = require('./GameObject.ts');
+import type Player = require('./Player.ts');
 
 type Session = {
   id: unknown;
-  player?: Promise<PlayerEntity | null>;
+  player?: Promise<Player | null>;
   view: StateView;
   seen: Set<VisibleEntity>;
   area?: number;
@@ -29,10 +31,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   private sessions = new Map<string, Session>();
 
   onCreate() {
-    this.setTimestep(GameServer.update, GameServer.updateRate);
-    this.clock.setInterval(GameServer.regenerate, GameServer.regenRate);
-    GameServer.schedule = (callback: (...args: any[]) => void, delay: number, ...args: any[]) =>
-      this.clock.setTimeout(callback, delay, ...args);
+    this.setTimestep(() => GameServer.update(), GameServer.updateRate);
+    this.clock.setInterval(() => GameServer.regenerate(), GameServer.regenRate);
+    GameServer.schedule = (callback, delay) => this.clock.setTimeout(callback, delay);
     this.clock.setInterval(() => {
       for (const client of this.clients) {
         const session = this.sessions.get(client.sessionId);
@@ -71,7 +72,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.syncWorld();
     for (const [sessionId, session] of this.sessions) {
       const player = GameServer.getPlayer(sessionId);
-      const update: (PlayerEvents & Partial<Tile> & { teleport?: Tile }) | undefined = player?.getIndividualUpdatePackage()?.clean();
+      const update = player?.getIndividualUpdatePackage()?.clean();
       if (!session.ready || !update) continue;
       const client = this.clients.getById(sessionId);
       if (!client) continue;
@@ -83,9 +84,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   }
 
   private syncWorld() {
-    const dirty = GameServer.changedEntities as Set<WorldEntity>;
-    const changedAreas = GameServer.changedAreas as Set<number>;
-    const removed: WorldEntity[] = [];
+    const dirty = GameServer.changedEntities;
+    const changedAreas = GameServer.changedAreas;
+    const removed: GameObject[] = [];
     for (const entity of dirty) {
       if (entity.inWorld) syncEntity(this.state, entity);
       else removed.push(entity);
@@ -93,7 +94,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
 
     let online = 0;
     for (const [sessionId, session] of this.sessions) {
-      const player: PlayerEntity | undefined = GameServer.getPlayer(sessionId);
+      const player = GameServer.getPlayer(sessionId);
       if (!player) continue;
       if (session.ready) online++;
       let self = this.state.self.get(sessionId);
@@ -112,7 +113,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       session.area = player.aoi;
       const seen = new Set<VisibleEntity>();
       for (const id of nearby) {
-        for (const entity of GameServer.AOIs[id].entities as WorldEntity[]) {
+        for (const entity of GameServer.AOIs[id].entities) {
           const row = this.state[entityCollection[entity.category]].get(String(entity.id));
           if (row) seen.add(row);
         }
@@ -157,11 +158,12 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     chat: (client: Client, txt: string) => {
       if (!this.sessions.get(client.sessionId)?.ready || typeof txt !== 'string' || !txt.trim() || txt.length > 300) return;
       const sender = GameServer.getPlayer(client.sessionId);
+      if (!sender) return;
       const nearby = AOIutils.listAdjacentAOIs(sender.aoi);
       for (const peer of this.clients) {
         if (peer === client || !this.sessions.get(peer.sessionId)?.ready) continue;
         const player = GameServer.getPlayer(peer.sessionId);
-        if (nearby.includes(player.aoi)) peer.send('chat', { id: sender.id, txt });
+        if (player && nearby.includes(player.aoi)) peer.send('chat', { id: sender.id, txt });
       }
     },
     ponq: (client: Client, stamp: number) => {

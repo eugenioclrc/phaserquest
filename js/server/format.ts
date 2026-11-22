@@ -3,38 +3,35 @@
  */
 
 // https://github.com/bjorn/tiled/wiki/JSON-Map-Format
-const fs = require('fs');
+import fs = require('node:fs');
+import type { TiledMap, TiledObjectLayer, TiledTileLayer } from './WorldTypes.ts';
 
-class Layer {
-  constructor(w, h, name, level) {
-    this.width = w;
-    this.height = h;
-    this.name = name;
-    this.type = 'tilelayer';
-    this.visible = true;
-    this.x = 0;
-    this.y = 0;
-    this.data = []; // Array of tiles
-    this.opacity = 1;
-    this.properties = { // stores additional non-standard properties
-      level, // high or ground
-    };
+class Layer implements TiledTileLayer {
+  readonly type = 'tilelayer';
+  readonly visible = true;
+  readonly x = 0;
+  readonly y = 0;
+  readonly data: number[] = [];
+  readonly opacity = 1;
+  readonly properties: { level: 'ground' | 'high' };
+
+  constructor(public width: number, public height: number, readonly name: string, level: 'ground' | 'high') {
+    this.properties = { level };
   }
 }
 
-function tileMap(map, isClient) {
-    // Common to both
-  this.height = map.height;
-  this.width = map.width;
-  this.tilewidth = map.tilewidth;
-  this.tileheight = map.tileheight;
-  this.layers = [];
-  this.tilesets = [map.tilesets[0]];
-  if (isClient) {
-    this.orientation = map.orientation; // iso or ortho ; mandatory
-    this.properties = map.properties;
-  }
+function tileMap(map: TiledMap, isClient: boolean): TiledMap {
+  return {
+    height: map.height,
+    width: map.width,
+    tilewidth: map.tilewidth,
+    tileheight: map.tileheight,
+    layers: [],
+    tilesets: [map.tilesets[0]],
+    ...(isClient ? { orientation: map.orientation, properties: map.properties } : {}),
+  };
 }
+
 // Break map: don't forget the doors and entities (and later, music)
 function formatMap() {
   console.log('Formatting ...');
@@ -43,15 +40,15 @@ function formatMap() {
 
   fs.readFile(`${__dirname + path + name}.json`, 'utf8', (err, data) => {
     if (err) throw err;
-    const map = JSON.parse(data);
+    const map = JSON.parse(data) as TiledMap;
         // Copy a few properties from the initial map object into a new one
-    const clientmap = new tileMap(map, true);
-    const servermap = new tileMap(map, false);
+    const clientmap = tileMap(map, true);
+    const servermap = tileMap(map, false);
 
     const newLayers = [new Layer(map.width, map.height, 'layer0', 'ground')]; // array of ground-level layers
     const highLayers = [new Layer(map.width, map.height, 'highlayer0', 'high')]; // array of layers appearing above entities
-    const clientObjectLayers = [];
-    const serverObjectLayers = [];
+    const clientObjectLayers: TiledObjectLayer[] = [];
+    const serverObjectLayers: TiledObjectLayer[] = [];
         // Fill the layers with 0's
     fillLayer(highLayers[0], map.width * map.height);
     fillLayer(newLayers[0], map.width * map.height);
@@ -86,8 +83,8 @@ function formatMap() {
 
     console.log(`${clientObjectLayers.length} client object layers`);
     console.log(`${serverObjectLayers.length} server object layers`);
-    clientmap.layers = newLayers.concat(highLayers).concat(clientObjectLayers);
-    servermap.layers = newLayers.concat(highLayers).concat(serverObjectLayers);
+    clientmap.layers = [...newLayers, ...highLayers, ...clientObjectLayers];
+    servermap.layers = [...newLayers, ...highLayers, ...serverObjectLayers];
 
     console.log(`Initial #layers = ${map.layers.length}`);
     console.log(`New #layers = ${clientmap.layers.length}`);
@@ -100,7 +97,7 @@ function formatMap() {
     });
   });
 }
-function countTiles(arr) {
+function countTiles(arr: TiledTileLayer[]) {
   for (let i = 0; i < arr.length; i++) {
     const tmp = arr[i].data.slice();
     const nb = tmp.map(x => +(x > 0)).reduce((a, b) => a + b, 0);
@@ -108,7 +105,7 @@ function countTiles(arr) {
   }
 }
 
-function findTiles(layer) {
+function findTiles(layer: TiledTileLayer) {
   for (let i = 0; i < layer.data.length; i++) {
     if (layer.data[i] > 0) {
       const x = i % layer.width;
@@ -118,7 +115,7 @@ function findTiles(layer) {
   }
 }
 
-function addTile(layerArray, high, index, tile, w, h) {
+function addTile(layerArray: Layer[], high: boolean, index: number, tile: number, w: number, h: number) {
   if (tile == 0) return;
   let depth = 0;
     // Look for the first layer wih an empty tile at the corresponding position (=index)
@@ -133,17 +130,17 @@ function addTile(layerArray, high, index, tile, w, h) {
   layerArray[depth].data[index] = tile;
 }
 
-function fillLayer(layer, n) {
+function fillLayer(layer: TiledTileLayer, n: number) {
   for (let k = 0; k < n; k++) {
     layer.data.push(0);
   }
 }
 
-function filterEntities(layer) {
+function filterEntities(layer: TiledObjectLayer) {
   const tmpobj = [];
   for (let i = 0; i < layer.objects.length; i++) {
     const obj = layer.objects[i];
-    const gid = obj.gid;
+    const gid = obj.gid ?? 0;
         // gid between 6 and 12 or 18 and 27  (1961 + )
     if ((gid >= 1961 + 6 && gid <= 1961 + 12) || (gid >= 1961 + 18 && gid <= 1961 + 27)) {
       tmpobj.push(obj);
@@ -153,7 +150,7 @@ function filterEntities(layer) {
   return layer;
 }
 
-function breakMap(map) {
+function breakMap(map: TiledMap) {
   const path = '/../../assets/maps/';
   const AOIwidth = 34; // 6 AOIs horizontally
   const AOIheight = 20; // 16 AOIs vertically
@@ -176,7 +173,7 @@ function breakMap(map) {
       layer.height = AOIheight;
             // TODO : also filter objects
       if (layer.type === 'tilelayer') {
-        let tmpdata = [];
+        let tmpdata: number[] = [];
                 // console.log('data length : '+layer.data.length);
         for (let yi = 0; yi < AOIheight; yi++) {
           const begin = liststart + yi * mapWidth;
@@ -194,4 +191,4 @@ function breakMap(map) {
   }
 }
 
-module.exports.format = formatMap;
+export = { format: formatMap };

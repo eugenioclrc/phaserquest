@@ -1,5 +1,5 @@
-import type { PlayerEvents, Tile } from '../../shared/WorldProtocol.ts';
-export type { PathAction, Tile } from '../../shared/WorldProtocol.ts';
+import type { PlayerEvents, Tile } from '../shared/WorldProtocol.ts';
+export type { PathAction, Tile } from '../shared/WorldProtocol.ts';
 
 export interface PlayerSnapshot extends Tile {
   id: number;

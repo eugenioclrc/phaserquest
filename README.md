@@ -30,9 +30,9 @@ The build writes the browser bundle to `dist/`. The game server serves the bundl
 
 ## Code layout
 
-- `index.html` loads the Phaser 4 client from `src/phaser4/`. `WorldScene.ts` handles gameplay rendering and input, `main.ts` connects the browser controls, and `connection.ts` exchanges updates with the server.
-- `server.js` starts HTTP, MongoDB and one persistent Colyseus room named `world`.
-- `js/server/GameServer.js` runs the simulation. `js/server/WorldRoom.ts` manages sessions and uses `js/server/WorldState.ts` to synchronize nearby entities and each player's own health. `js/server/CharacterStore.js` reads and writes MongoDB saves.
+- `index.html` loads the Phaser 4 client from `src/`. `WorldScene.ts` handles gameplay rendering and input, `main.ts` connects the browser controls, and `connection.ts` exchanges updates with the server.
+- `server.ts` starts HTTP, MongoDB and one persistent Colyseus room named `world`.
+- `js/server/GameServer.ts` runs the simulation. `js/server/WorldRoom.ts` manages sessions and uses `js/server/WorldState.ts` to synchronize nearby entities and each player's own health. `js/server/CharacterStore.ts` reads and writes MongoDB saves.
 
 ## Deploy or roll back
 

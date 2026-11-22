@@ -7,10 +7,11 @@ import { ObjectId } from 'mongodb';
 import express from 'express';
 import { WorldRoom } from '../js/server/WorldRoom.ts';
 import { createGameServer } from '../js/server/createGameServer.ts';
-import { CharacterStore } from '../js/server/CharacterStore.js';
+import { CharacterStore } from '../js/server/CharacterStore.ts';
+import { characterCollection } from './character-collection.ts';
 
-const { GameServer } = require('../js/server/GameServer.js');
-const { Item } = require('../js/server/Item.js');
+import GameServer = require('../js/server/GameServer.ts');
+import Item = require('../js/server/Item.ts');
 
 async function until(ready: () => boolean) {
   const end = Date.now() + 1500;
@@ -22,13 +23,13 @@ async function until(ready: () => boolean) {
 
 test('state contains only nearby avatars and the local character health', async () => {
   const ids = ['200000000000000000000001', '200000000000000000000002', '200000000000000000000003'];
-  GameServer.characters = new CharacterStore({
+  GameServer.characters = new CharacterStore(characterCollection({
     findOne: async ({ _id }: { _id: ObjectId }) => {
       const index = ids.indexOf(_id.toString());
       if (index < 0) return null;
       return { _id, name: 'Scout' + index, x: index === 2 ? 99 : 12 + index, y: 12, weapon: 'sword1', armor: 'clotharmor' };
     },
-  });
+  }));
   await GameServer.readMap();
   const http = createServer(express());
   const server = createGameServer(http, { world: defineRoom(WorldRoom) });
@@ -53,6 +54,7 @@ test('state contains only nearby avatars and the local character health', async 
     expect(first.state.self.get(first.sessionId)?.playerId).toBe(0);
 
     const player = GameServer.getPlayer(second.sessionId);
+    if (!player) throw new Error('The second character did not enter');
     const firstPlayerId = String(first.state.self.get(first.sessionId)!.playerId);
     const playerKey = String(player.id);
     const move = (x: number) => {
@@ -90,7 +92,7 @@ test('state contains only nearby avatars and the local character health', async 
     await until(() => !first.state.monsters.has(monsterKey) && distant.state.monsters.has(monsterKey));
     expect(distant.state.monsters.get(monsterKey)?.route).toBeUndefined();
 
-    const item = new Item(14, 12, 'flask', false, true, false);
+    const item = new Item(GameServer, 14, 12, 'flask', false, true, false);
     GameServer.addAtLocation(item);
     const itemKey = String(item.id);
     await until(() => first.state.items.get(itemKey)?.inChest === true);
