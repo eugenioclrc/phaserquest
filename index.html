@@ -1,37 +1,69 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Phaser Quest</title>
-    <style>
-        body {
-            background: radial-gradient(circle 1200px at center, transparent, #000), url('/assets/sprites/wood.png') repeat, #000;
-            margin: 0;
-        }
-        #game {
-            cursor: url('/assets/sprites/hand.png'), auto;
-            max-width: 980px;
-            max-height: 500px;
-            margin-left: auto;
-            margin-right: auto;
-            padding: 0;
-        }
-        @font-face {
-            font-family: 'pixel';
-            src: url('/assets/fonts/advocut-webfont.ttf');
-        }
-        .fontPreload {
-            font-family: 'pixel';
-            position: absolute;
-            left: -100px;
-        }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phaser Quest</title>
+  <link rel="stylesheet" href="/src/phaser4/preview.css">
 </head>
 <body>
-    <div class="fontPreload">.</div> <!-- don't forget the dot, the div cannot be empty-->
-    <div id='game'></div>
-    <script vite-ignore src="/vendor/phaser.js"></script>
-    <script vite-ignore src="/vendor/phaser-input.js"></script>
-    <script type="module" src="/src/entry-game.js"></script>
+  <main class="game-page">
+    <header class="game-header">
+      <h1>Phaser Quest</h1>
+    </header>
+
+    <form id="character-form" class="character-form" aria-label="Choose a character">
+      <div class="character-field">
+        <label id="character-label" for="character-name">Character name</label>
+        <input id="character-name" name="character" required maxlength="20" autocomplete="off" spellcheck="false">
+      </div>
+      <button id="play-button" type="submit" disabled>Play</button>
+      <button id="reset-button" type="button" hidden disabled>Reset character</button>
+    </form>
+
+    <dialog id="reset-dialog" aria-labelledby="reset-title" aria-describedby="reset-warning">
+      <h2 id="reset-title">Reset your character?</h2>
+      <p id="reset-warning"></p>
+      <p id="reset-status" role="status"></p>
+      <button id="cancel-reset" type="button" autofocus>Cancel</button>
+      <button id="confirm-reset" type="button">Delete character</button>
+    </dialog>
+
+    <p id="status" role="status"></p>
+    <div id="phaser4-game" role="region" aria-label="Game world"></div>
+
+    <section id="game-hud" class="game-hud" aria-label="Player controls" hidden>
+      <dl class="game-stats">
+        <div><dt>Health</dt><dd><meter id="health-meter" aria-label="Health" min="0" max="100" value="100"></meter> <span id="hero-health">100</span></dd></div>
+        <div><dt>Players</dt><dd id="players-online">0</dd></div>
+      </dl>
+      <dl class="game-stats">
+        <div><dt>Armor</dt><dd id="hero-armor">Cloth Armor</dd></div>
+        <div><dt>Weapon</dt><dd id="hero-weapon">Sword 1</dd></div>
+      </dl>
+      <button id="revive-button" type="button" hidden>Revive</button>
+
+      <form id="chat-form" class="chat-form">
+        <label for="chat-message">Chat</label>
+        <input id="chat-message" name="message" required maxlength="300" autocomplete="off" enterkeyhint="send" placeholder="Message nearby players">
+        <button type="submit">Send</button>
+      </form>
+      <output id="loot-notice" hidden></output>
+      <div class="session-controls">
+        <details id="help-panel" name="guide">
+          <summary>How to play</summary>
+          <ul id="help-text"></ul>
+        </details>
+        <details id="achievements-panel" name="guide">
+          <summary>Achievements</summary>
+          <p id="achievements-count"></p>
+          <ul id="achievements-list"></ul>
+        </details>
+        <button id="sound-button" type="button" aria-pressed="true">Sound on</button>
+      </div>
+      <div id="achievement-notice" role="log" aria-label="Recent achievements"></div>
+    </section>
+  </main>
+  <script type="module" src="/src/phaser4/main.ts"></script>
 </body>
 </html>
