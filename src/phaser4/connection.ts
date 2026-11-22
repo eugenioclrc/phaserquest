@@ -3,7 +3,7 @@ import { CoDec, type ObjectSchema } from '../../shared/CoDec.ts';
 import Decoder from '../Decoder.ts';
 import type { PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
 
-type EntryRequest = { new: true; name: string } | { new: false; id: string };
+type EntryRequest = { id: string };
 
 type Initialization = {
   stamp: number;
@@ -25,8 +25,7 @@ type ServerEvents = {
   update(data: ArrayBuffer | Update): void;
   reset(tile: Tile | null): void;
   chat(message: { id: number; txt: string }): void;
-  dbError(error?: { retryable?: boolean } | null): void;
-  pid(id: string): void;
+  dbError(error: { code: string }): void;
   wait(): void;
 };
 
@@ -36,7 +35,6 @@ type ClientEvents = {
   path(movement: { path: Tile[]; action: PathAction; or: number }): void;
   revive(): void;
   chat(text: string): void;
-  delete(data: { id: string }, ack: (reply: { ok: boolean }) => void): void;
 };
 
 type ConnectionEvents = {
@@ -65,6 +63,38 @@ function clearCharacter(id: string) {
   }
 }
 
+function postCharacter(url: string, body: { id: string; name?: string }) {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(5000),
+  });
+}
+
+async function createCharacter(name: string): Promise<string> {
+  const key = 'pendingCharacter';
+  const pending = JSON.parse(sessionStorage.getItem(key) || 'null') as { id: string; name: string } | null;
+  const id = pending?.name === name ? pending.id : Array.from(crypto.getRandomValues(new Uint8Array(12)),
+    byte => byte.toString(16).padStart(2, '0')).join('');
+  sessionStorage.setItem(key, JSON.stringify({ id, name }));
+  const response = await postCharacter('/api/characters', { id, name });
+  if (response.status === 409) sessionStorage.removeItem(key);
+  if (!response.ok || (await response.json()).id !== id) throw new Error('Creation was not confirmed');
+  localStorage.setItem('name', name);
+  localStorage.setItem('armor', 'clotharmor');
+  localStorage.setItem('weapon', 'sword1');
+  localStorage.setItem('playerID', id);
+  sessionStorage.removeItem(key);
+  return id;
+}
+
+function characterMessage(code: string): string {
+  if (code === 'missing') return 'This saved character could not be found.';
+  if (code === 'busy') return 'This character is already in the game. Try again after leaving.';
+  return 'Could not reach the character database. Try again.';
+}
+
 function unpack<T>(data: ArrayBuffer | T, schema: ObjectSchema): T {
   return data instanceof ArrayBuffer ? Decoder.decode(data, schema) as T : data;
 }
@@ -75,6 +105,7 @@ export function createConnection(events: ConnectionEvents) {
   let entered = false;
   let retry: number | undefined;
   let deleting = false;
+  let creating = false;
 
   function cancelRetry() {
     window.clearTimeout(retry);
@@ -122,15 +153,6 @@ export function createConnection(events: ConnectionEvents) {
     }, 500);
   });
 
-  socket.on('pid', (id) => {
-    if (!request?.new) return;
-    localStorage.setItem('name', request.name);
-    localStorage.setItem('armor', 'clotharmor');
-    localStorage.setItem('weapon', 'sword1');
-    localStorage.setItem('playerID', id);
-    request = { new: false, id };
-  });
-
   socket.on('init', (payload) => {
     if (!request || entered) return;
     cancelRetry();
@@ -152,47 +174,53 @@ export function createConnection(events: ConnectionEvents) {
 
   socket.on('reset', (tile) => { if (entered && tile) events.reset(tile); });
   socket.on('chat', ({ id, txt }) => { if (entered) events.say(id, txt); });
-  socket.on('dbError', (error) => {
+  socket.on('dbError', ({ code }) => {
     if (!request || entered) return;
     cancelRetry();
-    if (!error?.retryable && !request.new) clearCharacter(request.id);
+    if (code === 'missing') clearCharacter(request.id);
     request = null;
-    events.error(error?.retryable ? 'Could not reach the character database. Try again.' : 'This saved character could not be found.');
+    events.error(characterMessage(code));
   });
 
   return {
     async deleteCharacter(id: string): Promise<boolean> {
-      if (deleting || request || savedCharacter()?.id !== id) return false;
+      if (deleting || creating || request || savedCharacter()?.id !== id) return false;
       deleting = true;
       try {
-        socket.connect();
-        const reply = await socket.timeout(5000).emitWithAck('delete', { id });
-        if (reply?.ok !== true) return false;
+        const response = await postCharacter('/api/characters/delete', { id });
+        if (!response.ok || (await response.json()).ok !== true) return false;
         clearCharacter(id);
         return true;
       } catch {
         return false;
       } finally {
         deleting = false;
-        socket.disconnect();
       }
     },
-    play(name?: string) {
-      if (request || deleting) return;
+    async play(name?: string) {
+      if (request || creating || deleting) return;
       if (name === undefined) {
         const saved = savedCharacter();
         if (!saved) {
           events.error('There is no saved character to load.');
           return;
         }
-        request = { new: false, id: saved.id };
+        request = { id: saved.id };
       } else {
         const playerName = name.trim();
         if (!playerName || playerName.length > 20) {
           events.error('Enter a character name of 1 to 20 characters.');
           return;
         }
-        request = { new: true, name: playerName };
+        creating = true;
+        try {
+          request = { id: await createCharacter(playerName) };
+        } catch {
+          events.error('Could not create the character. Try again.');
+          return;
+        } finally {
+          creating = false;
+        }
       }
       if (socket.connected) requestEntry();
       else socket.connect();

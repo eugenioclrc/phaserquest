@@ -36,7 +36,6 @@ const GameServer = {
 module.exports.GameServer = GameServer;
 module.exports.randomInt = randomInt;
 
-const { ObjectId } = require('mongodb');
 const { spaceMap } = require('../../shared/spaceMap.ts');
 const ChestArea = require('./chestarea.js').ChestArea;
 const { AOIutils } = require('../../shared/AOIutils.ts');
@@ -258,58 +257,24 @@ GameServer.checkSocketID = function (id) { // check if no other player is using 
   return (GameServer.getPlayerID(id) === undefined);
 };
 
-GameServer.addNewPlayer = async function (socket, data) {
-  if (!socket.connected || typeof data.name !== 'string' || !data.name.length) return;
-  const player = new Player(data.name);
-  let result;
+GameServer.loadPlayer = async function (sessionId, id, isConnected) {
+  const document = await GameServer.characters.open(id);
+  const mongoId = document._id.toString();
+  if (!isConnected()) {
+    await GameServer.characters.close(mongoId);
+    return null;
+  }
   try {
-    result = await GameServer.server.db.collection('players').insertOne(player.dbTrim());
-  } catch (err) {
-    console.error('Could not create character', err);
-    if (socket.connected) GameServer.server.sendError(socket, { retryable: true });
-    return;
+    const player = new Player();
+    player.setIDs(mongoId, sessionId);
+    player.getDataFromDb(document);
+    GameServer.embedPlayer(player);
+    GameServer.addPlayerID(sessionId, player.id);
+    return player;
+  } catch (error) {
+    await GameServer.characters.close(mongoId);
+    throw error;
   }
-  if (!socket.connected) return;
-  const mongoID = result.insertedId.toString();
-  player.setIDs(mongoID, socket.id);
-  GameServer.finalizePlayer(socket, player);
-  GameServer.server.sendID(socket, mongoID);
-};
-
-GameServer.loadPlayer = async function (socket, id) {
-  if (!socket.connected) return;
-  if (typeof id !== 'string' || !ObjectId.isValid(id)) {
-    GameServer.server.sendError(socket);
-    return;
-  }
-  let document;
-  try {
-    document = await GameServer.server.db.collection('players').findOne({ _id: new ObjectId(id) });
-  } catch (err) {
-    console.error('Could not load character', err);
-    if (socket.connected) GameServer.server.sendError(socket, { retryable: true });
-    return;
-  }
-  if (!socket.connected) return;
-  if (!document) {
-    GameServer.server.sendError(socket);
-    return;
-  }
-  const mongoID = document._id.toString();
-  if (Object.values(GameServer.players).some(player => player.getMongoID() === mongoID)) {
-    socket.emit('wait');
-    return;
-  }
-  const player = new Player();
-  player.setIDs(mongoID, socket.id);
-  player.getDataFromDb(document);
-  GameServer.finalizePlayer(socket, player);
-};
-
-GameServer.finalizePlayer = function (socket, player) {
-  GameServer.addPlayerID(socket.id, player.id);
-  GameServer.embedPlayer(player);
-  GameServer.server.sendInitializationPacket(socket, GameServer.createInitializationPacket(player.id));
 };
 
 GameServer.createInitializationPacket = function (playerID) {
@@ -332,29 +297,12 @@ GameServer.embedPlayer = function (player) {
 
 GameServer.savePlayer = async function (player) {
   const document = player.dbTrim();
-  try {
-    const result = await GameServer.server.db.collection('players').updateOne(
-      { _id: new ObjectId(player.getMongoID()) },
-      { $set: document }
-    );
-    if (result.matchedCount) player.lastSavedPosition = { x: document.x, y: document.y };
-  } catch (err) {
-    console.error('Could not save character', err);
+  if (await GameServer.characters.save(player.getMongoID(), document)) {
+    player.lastSavedPosition = { x: document.x, y: document.y };
   }
 };
 
-GameServer.deletePlayer = async function (id) {
-  if (typeof id !== 'string' || !ObjectId.isValid(id)) return false;
-  try {
-    const result = await GameServer.server.db.collection('players').deleteOne({ _id: new ObjectId(id) });
-    return result.acknowledged;
-  } catch (err) {
-    console.error('Could not delete character', err);
-    return false;
-  }
-};
-
-GameServer.removePlayer = function (socketID) {
+GameServer.removePlayer = async function (socketID) {
   const player = GameServer.getPlayer(socketID);
   GameServer.removeFromLocation(player);
   player.setProperty('connected', false);
@@ -366,6 +314,8 @@ GameServer.removePlayer = function (socketID) {
   delete GameServer.players[player.id];
   GameServer.nbConnectedChanged = true;
   GameServer.deleteSocketID(socketID);
+  await GameServer.characters.close(player.getMongoID());
+  delete GameServer.IDmap[player.id];
 };
 
 GameServer.revivePlayer = function (playerID) {
@@ -487,53 +437,36 @@ GameServer.convertPath = function (p) {
   return path;
 };
 
-GameServer.handlePath = function (path, action, orientation, socket) { // Processes a path sent by a client
-    // Path is the array of tiles to travel through
-    // Action is a small object indicating what to do at the end of the path (pick up loot, attack monster ..)
-    // orientation is a value between 1 and 4 indicating the orientation the player should have at the end of the path
-    // socket is the socket of the client who sentt the path
-  const player = GameServer.getPlayer(socket.id);
-  if (!player || !player.alive) return false;
+GameServer.handlePath = function (sessionId, command, latencyMs) {
+  const player = GameServer.getPlayer(sessionId);
+  if (!player?.alive || !command || typeof command !== 'object') return false;
 
-  if (path.length > 60) {
-        // The only way to have a path that long is to request it using the console instead of the normal interface
-    console.log('Path too long');
-    return false;
+  const { path, action, or: orientation } = command;
+  if (!action || ![0, 3, 4].includes(action.action)) return false;
+  if (!Number.isInteger(orientation) || orientation < 1 || orientation > 4) return false;
+  if (!Array.isArray(path) || path.length < (action.action === 0 ? 2 : 1) || path.length > 60) return false;
+
+  const inBounds = tile => tile && Number.isInteger(tile.x) && Number.isInteger(tile.y) &&
+    tile.x >= 0 && tile.x < GameServer.map.width && tile.y >= 0 && tile.y < GameServer.map.height;
+  if (!path.every(inBounds) || (action.action === 4 && !inBounds(action))) return false;
+
+  const start = path[0];
+  const end = path[path.length - 1];
+  if (manhattanDistance(start.x, start.y, end.x, end.y) > AOIutils.tileHeight + 8) return false;
+  if (Math.abs(start.x - player.x) > 1 || Math.abs(start.y - player.y) > 1) return false;
+  for (let i = 1; i < path.length; i++) {
+    const tile = path[i];
+    if (!GameServer.adjacent(tile, path[i - 1]) || GameServer.collisionGrid[tile.y][tile.x]) return false;
   }
 
-  if (manhattanDistance(path[0].x, path[0].y, path[path.length - 1].x, path[path.length - 1].y) > AOIutils.tileHeight + 8) {
-        // Same ; used to prevent travelling through more than two AOI's at once, because the AOI-related updates take place only when a path is finished
-    console.log('Distance too big');
-    console.log(manhattanDistance(path[0].x, path[0].y, path[path.length - 1].x, path[path.length - 1].y));
-    return false;
-  }
-
-  if (Math.abs(path[0].x - player.x) > 1 || Math.abs(path[0].y - player.y) > 1) { // Check for mismatch between client-side and server-side coordinates
-    console.log('Wrong start coordinates');
-    console.log(`Server : ${player.x}, ${player.y}`);
-    console.log(`Client : ${path[0].x}, ${path[0].y}`);
-    return false;
-  }
-
-  for (let p = 1; p < path.length; p++) {
-    if (!GameServer.adjacent(path[p], path[p - 1])) { // Check if the provided path is continuous, without any jumps in it (would be cheating)
-      console.log('Jump in path');
-      return false;
-    }
-    if (GameServer.collisionGrid[path[p].y][path[p].x]) { // Check that the path doesn't contain collidable tiles (would be cheating)
-      console.log('Obstacle on path');
-      return false;
-    }
-  }
-
-  if (action && action.action == 3) { // fight
+  if (action.action === 3) {
+    if (!Number.isSafeInteger(action.id) || action.id < 0) return false;
     const monster = GameServer.monstersTable[action.id];
     if (!monster?.alive) return false;
     if (!player.inFight || !player.target?.alive) player.setTarget(monster);
   }
-  const departureTime = Date.now() - socket.latency; // Needed the corrected departure time for the update loop (updateWalk())
-  player.setRoute(path, departureTime, socket.latency, action, orientation);
-  if (player.inFight && action && action.action != 3) player.endFight();
+  player.setRoute(path, Date.now() - latencyMs, latencyMs, action, orientation);
+  if (player.inFight && action.action !== 3) player.endFight();
   return true;
 };
 

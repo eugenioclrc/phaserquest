@@ -6,7 +6,9 @@ const express = require('express');
 const { Server } = require('socket.io');
 const { MongoClient } = require('mongodb');
 
+const { CharacterStore, characterId } = require('./js/server/CharacterStore.js');
 const gs = require('./js/server/GameServer.js').GameServer;
+const { Player } = require('./js/server/Player.js');
 const { CoDec } = require('./shared/CoDec.ts');
 const Encoder = require('./js/server/Encoder.ts');
 
@@ -27,6 +29,32 @@ const io = new Server(server, {
 server.enableBinary = true;
 gs.server = server;
 
+app.use('/api/characters', express.json({ limit: '4kb' }));
+app.post('/api/characters', async (req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  if (!name || name.length > 20) return res.sendStatus(400);
+  if (!gs.mapReady) return res.sendStatus(503);
+  try {
+    const id = characterId(req.body.id);
+    res.json({ id: await gs.characters.create(id, new Player(name).dbTrim()) });
+  } catch (error) {
+    res.sendStatus(characterStatus(error));
+  }
+});
+app.post('/api/characters/delete', async (req, res) => {
+  try {
+    res.json({ ok: await gs.characters.delete(req.body?.id) });
+  } catch (error) {
+    res.sendStatus(characterStatus(error));
+  }
+});
+
+function characterStatus(error) {
+  if (error.code === 'missing') return 400;
+  if (error.code === 'busy') return 409;
+  return 503;
+}
+
 app.use('/assets', express.static(join(__dirname, 'assets')));
 app.get('/phaser4.html', (req, res) => {
   res.redirect('/');
@@ -45,7 +73,7 @@ async function start() {
     serverSelectionTimeoutMS: 5000,
   });
   await mongo.connect();
-  server.db = mongo.db(process.env.MONGODB_DB || 'phaserQuest');
+  gs.characters = new CharacterStore(mongo.db(process.env.MONGODB_DB || 'phaserQuest').collection('players'));
 
   if (options.dev) {
     const { createServer: createViteServer } = await import('vite');
@@ -93,11 +121,10 @@ io.on('connection', (socket) => {
     }
     initializing = true;
     try {
-      if (data.new) {
-        await gs.addNewPlayer(socket, data);
-      } else {
-        await gs.loadPlayer(socket, data.id);
-      }
+      const player = await gs.loadPlayer(socket.id, data.id, () => socket.connected);
+      if (player) server.sendInitializationPacket(socket, gs.createInitializationPacket(player.id));
+    } catch (error) {
+      if (socket.connected) socket.emit('dbError', { code: error.code ?? 'unavailable' });
     } finally {
       initializing = false;
     }
@@ -108,7 +135,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('path', (data) => {
-    if (!gs.handlePath(data.path, data.action, data.or, socket)) socket.emit('reset', gs.getCurrentPosition(socket.id));
+    if (!gs.handlePath(socket.id, data, socket.latency)) socket.emit('reset', gs.getCurrentPosition(socket.id));
   });
 
   socket.on('chat', (txt) => {
@@ -121,11 +148,6 @@ io.on('connection', (socket) => {
         io.to(player.socketID).emit('chat', { id: sender.id, txt });
       }
     }
-  });
-
-  socket.on('delete', async (data, ack) => {
-    const ok = await gs.deletePlayer(data?.id);
-    if (typeof ack === 'function') ack({ ok });
   });
 
   socket.on('disconnect', () => {
@@ -153,14 +175,6 @@ server.sendUpdate = function (socketID, pkg) {
 
 server.getNbConnected = function () {
   return Object.keys(gs.players).length;
-};
-
-server.sendID = function (socket, playerID) {
-  socket.emit('pid', playerID);
-};
-
-server.sendError = function (socket, details) {
-  socket.emit('dbError', details);
 };
 
 server.addStamp = function (pkg) {
