@@ -76,6 +76,7 @@ class MovingEntity extends GameObject {
   setAtDelta(delta) {
     // Update the position of an entity by putting at the delta'th tile along it's path (see updateWalk())
     if (!this.route.path) return;
+    this.route.step = delta;
     this.x = this.route.path[delta].x; // no -1 because it's done in updateWalk() aready
     this.y = this.route.path[delta].y;
   }

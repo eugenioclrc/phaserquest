@@ -13,6 +13,10 @@ export interface PathCommand {
   or: number;
 }
 
+export interface MovementCorrection extends Tile {
+  route?: { path: Tile[]; orientation: number };
+}
+
 export const CharacterJoinError = {
   missing: 4404,
   busy: 4409,

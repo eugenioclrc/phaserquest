@@ -371,10 +371,17 @@ GameServer.findFreeAdjacentCell = function (x, y) {
   }
 };
 
-GameServer.getCurrentPosition = function (id) {
+GameServer.getMovementCorrection = function (id) {
   const player = GameServer.getPlayer(id);
   if (!player) return null;
-  return { x: player.x, y: player.y };
+  const position = { x: player.x, y: player.y };
+  const route = player.route;
+  if (!route) return position;
+
+  const path = route.path.slice(route.step);
+  if (path[0]?.x !== position.x || path[0]?.y !== position.y) path.unshift(position);
+  if (path.length < 2) return position;
+  return { ...position, route: { path, orientation: route.orientation } };
 };
 
 GameServer.convertPath = function (p) {
@@ -404,6 +411,7 @@ GameServer.handlePath = function (sessionId, command, latencyMs) {
   const end = path[path.length - 1];
   if (manhattanDistance(start.x, start.y, end.x, end.y) > AOIutils.tileHeight + 8) return false;
   if (Math.abs(start.x - player.x) > 1 || Math.abs(start.y - player.y) > 1) return false;
+  if (GameServer.collisionGrid[start.y][start.x] && (start.x !== player.x || start.y !== player.y)) return false;
   for (let i = 1; i < path.length; i++) {
     const tile = path[i];
     if (!GameServer.adjacent(tile, path[i - 1]) || GameServer.collisionGrid[tile.y][tile.x]) return false;

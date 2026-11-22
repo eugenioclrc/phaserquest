@@ -1,5 +1,5 @@
 import { Callbacks, Client, type Room } from '@colyseus/sdk';
-import { CharacterJoinError } from '../../shared/WorldProtocol.ts';
+import { CharacterJoinError, type MovementCorrection } from '../../shared/WorldProtocol.ts';
 import type { ItemSnapshot, MonsterSnapshot, PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
 
 import type { WorldRoom } from '../../js/server/WorldRoom.ts';
@@ -34,7 +34,7 @@ type ConnectionEvents = {
   enter(player: PlayerSnapshot, door?: Tile): void;
   updateWorld(update: WorldUpdate): void;
   updateSelf(update: PersonalUpdate): void;
-  reset(tile: Tile): void;
+  reset(correction: MovementCorrection): void;
   say(id: number, text: string): void;
   online(count: number): void;
   pending(message: string): void;
@@ -187,6 +187,7 @@ export function createConnection(events: ConnectionEvents) {
       }
 
       function ready() {
+        if (room !== next) return;
         heroPosition = undefined;
         sessionStorage.setItem(key, next.reconnectionToken);
         next.send('ready');
@@ -201,7 +202,8 @@ export function createConnection(events: ConnectionEvents) {
       });
       next.onReconnect(() => {
         dropped = false;
-        ready();
+        // The SDK rotates the token after notifying reconnect listeners.
+        queueMicrotask(ready);
       });
       next.onLeave(() => {
         for (const dispose of unbind.values()) dispose();
@@ -238,7 +240,9 @@ export function createConnection(events: ConnectionEvents) {
       next.onMessage('ping', pong);
       next.onMessage('revived', (tile: Tile) => { if (room === next && entered) events.updateSelf(tile); });
       next.onMessage('playerEvents', (update: PersonalUpdate) => { if (room === next && entered) events.updateSelf(update); });
-      next.onMessage('reset', (tile: Tile | null) => { if (room === next && entered && tile) events.reset(tile); });
+      next.onMessage('reset', (correction: MovementCorrection | null) => {
+        if (room === next && entered && correction) events.reset(correction);
+      });
       next.onMessage('chat', ({ id: sender, txt }: { id: number; txt: string }) => { if (room === next && entered) events.say(sender, txt); });
       ready();
     } catch (error) {

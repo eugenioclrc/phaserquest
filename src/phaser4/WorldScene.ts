@@ -1,4 +1,4 @@
-import { playerStepMs } from '../../shared/WorldProtocol.ts';
+import { playerStepMs, type MovementCorrection } from '../../shared/WorldProtocol.ts';
 import * as Phaser from 'phaser';
 import EasyStar from 'easystarjs';
 import type { ItemSnapshot, PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
@@ -311,7 +311,7 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  reset({ x, y }: Tile) {
+  reset({ x, y, route }: MovementCorrection) {
     const hero = this.heroId === undefined ? undefined : this.avatars.get(this.heroId);
     if (!hero) return;
     // A server reset can echo the original Tiled strings after a teleport.
@@ -332,6 +332,7 @@ export class WorldScene extends Phaser.Scene {
       this.lastCrossing = undefined;
       if (isCrossingSource(tile, crossing.path)) this.setHeroCamera(hero, crossing.previous);
     }
+    if (route && hero.alive) this.move(hero, route.path, route.orientation);
   }
 
   say(id: number, text: string) {

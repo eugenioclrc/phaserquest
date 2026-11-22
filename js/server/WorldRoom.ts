@@ -148,7 +148,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       const session = this.sessions.get(client.sessionId);
       if (!session?.ready) return;
       if (!GameServer.handlePath(client.sessionId, command, session.latency)) {
-        client.send('reset', GameServer.getCurrentPosition(client.sessionId));
+        client.send('reset', GameServer.getMovementCorrection(client.sessionId));
       }
     },
     revive: (client: Client) => {

@@ -67,7 +67,15 @@ test('world clients share one room, reserve characters and reconnect', async () 
     player.lastWalkUpdate = Date.now() + 5000;
     player.setRoute([{ x: 30, y: 31 }, { x: 31, y: 31 }, { x: 32, y: 31 }], Date.now(), 0, { action: 0 }, 3);
     player.x = 31;
+    player.route.step = 1;
     GameServer.moveAtLocation(player, 30, 31, 31, 31);
+
+    const corrected = Promise.withResolvers<unknown>();
+    first.onMessage('reset', corrected.resolve);
+    first.send('path', { path: [], action: { action: 0 }, or: 3 });
+    expect(await corrected.promise).toEqual({
+      x: 31, y: 31, route: { path: [{ x: 31, y: 31 }, { x: 32, y: 31 }], orientation: 3 },
+    });
 
     const token = first.reconnectionToken;
     first.reconnection.enabled = false;

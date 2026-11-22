@@ -5,6 +5,7 @@
 class Route {
   constructor(path, departureTime, latency, action, orientation) {
     this.path = path;
+    this.step = 0;
     // need departureTime for update loop and delta for client
     // timestamp of the start of the movement ; only used for the server
     this.departureTime = departureTime;
