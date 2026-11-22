@@ -41,9 +41,9 @@ function setStatus(message: string) {
 }
 
 const connection = createConnection({
-  enter(player) {
+  enter(player, nbAOIhorizontal, lastAOIid) {
     playerId = player.id;
-    world.enter(player);
+    world.enter(player, nbAOIhorizontal, lastAOIid);
     characterForm.hidden = true;
     gameHud.hidden = false;
     health.textContent = '100';
@@ -59,11 +59,14 @@ const connection = createConnection({
   online(count) {
     online.textContent = String(count);
   },
+  pending: setStatus,
   error(message) {
-    if (!characterForm.hidden) {
-      showCharacterForm();
-      playButton.disabled = false;
-    }
+    playerId = undefined;
+    world.leave();
+    gameHud.hidden = true;
+    characterForm.hidden = false;
+    showCharacterForm();
+    playButton.disabled = false;
     setStatus(message);
   },
 });
@@ -86,8 +89,7 @@ characterForm.addEventListener('submit', (event) => {
 chatForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const text = chatMessage.value.trim();
-  if (playerId === undefined || !text) return;
-  connection.chat(text);
+  if (playerId === undefined || !connection.chat(text)) return;
   world.say(playerId, text);
   chatMessage.value = '';
 });

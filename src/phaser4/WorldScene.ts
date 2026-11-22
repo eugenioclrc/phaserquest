@@ -1,5 +1,6 @@
 import * as Phaser from 'phaser4';
 import EasyStar from 'easystarjs';
+import { AOIutils } from '../../shared/AOIutils.ts';
 import type { PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
 
 type Direction = 1 | 2 | 3 | 4;
@@ -16,6 +17,7 @@ type Avatar = {
   weaponKey: string;
   direction: Direction;
   alive: boolean;
+  aoi?: number;
   motion?: Phaser.Tweens.Tween;
   speechTimer?: Phaser.Time.TimerEvent;
 };
@@ -45,7 +47,7 @@ export class WorldScene extends Phaser.Scene {
 
   constructor(
     private readonly onReady: () => void,
-    private readonly onPath: (path: Tile[], orientation: number) => void,
+    private readonly onPath: (path: Tile[], orientation: number) => boolean,
   ) {
     super('world');
   }
@@ -97,8 +99,10 @@ export class WorldScene extends Phaser.Scene {
     this.onReady();
   }
 
-  enter(player: PlayerSnapshot) {
+  enter(player: PlayerSnapshot, nbAOIhorizontal: number, lastAOIid: number) {
     this.leave();
+    AOIutils.nbAOIhorizontal = nbAOIhorizontal;
+    AOIutils.lastAOIid = lastAOIid;
     this.heroId = player.id;
     const hero = this.addAvatar(player);
     this.cameras.main.centerOn(hero.container.x, hero.container.y);
@@ -109,11 +113,19 @@ export class WorldScene extends Phaser.Scene {
     for (const player of update.newplayers ?? []) {
       if (player.id !== this.heroId) this.addAvatar(player);
     }
-    for (const [id, changes] of Object.entries(update.players ?? {})) {
-      const avatar = this.avatars.get(Number(id));
-      if (avatar) this.updateAvatar(avatar, changes, Number(id) === this.heroId);
+    for (const [key, changes] of Object.entries(update.players ?? {})) {
+      const id = Number(key);
+      const avatar = this.avatars.get(id);
+      if (avatar) this.updateAvatar(avatar, changes, id === this.heroId);
     }
     for (const id of update.disconnected ?? []) this.removeAvatar(id);
+
+    const hero = this.heroId === undefined ? undefined : this.avatars.get(this.heroId);
+    if (hero?.aoi === undefined) return;
+    const nearby = AOIutils.listAdjacentAOIs(hero.aoi);
+    for (const [id, avatar] of this.avatars) {
+      if (avatar.aoi !== undefined && !nearby.includes(avatar.aoi)) this.removeAvatar(id);
+    }
   }
 
   applySelf(update: PersonalUpdate) {
@@ -167,6 +179,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private updateAvatar(avatar: Avatar, changes: Partial<PlayerSnapshot>, isHero: boolean) {
+    if (changes.aoi !== undefined) avatar.aoi = changes.aoi;
     if (changes.name !== undefined) avatar.name.setText(changes.name);
     const armor = changes.armor === undefined ? undefined : this.equipment.get(changes.armor);
     const weapon = changes.weapon === undefined ? undefined : this.equipment.get(changes.weapon);
@@ -211,8 +224,7 @@ export class WorldScene extends Phaser.Scene {
     const path = this.findPath(start, end);
     if (!path || path.length < 2 || path.length > 60) return;
     const orientation = directionBetween(path[path.length - 2], end);
-    this.onPath(path, orientation);
-    this.move(hero, path, orientation);
+    if (this.onPath(path, orientation)) this.move(hero, path, orientation);
   }
 
   private findPath(start: Tile, end: Tile): Tile[] | null {

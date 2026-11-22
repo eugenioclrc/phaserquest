@@ -405,6 +405,15 @@ GameServer.moveAtLocation = function (entity, fromX, fromY, toX, toY) {
   if (AOIfrom.id != AOIto.id) {
     entity.setProperty('aoi', AOIto.id);
     const previousAOI = AOIfrom.id;
+    if (entity.category === 'player') {
+      // Receivers left behind need the new AOI to remove this avatar.
+      const nearby = AOIutils.listAdjacentAOIs(AOIto.id);
+      for (const id of AOIutils.listAdjacentAOIs(previousAOI)) {
+        if (GameServer.AOIs[id] && !nearby.includes(id)) {
+          GameServer.updateAOIproperty(id, entity.category, entity.id, 'aoi', AOIto.id);
+        }
+      }
+    }
     AOIfrom.deleteEntity(entity);
     AOIto.addEntity(entity, previousAOI);
   }

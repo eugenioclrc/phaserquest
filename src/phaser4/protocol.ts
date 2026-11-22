@@ -6,6 +6,7 @@ export interface Tile {
 export interface PlayerSnapshot extends Tile {
   id: number;
   name: string;
+  aoi?: number;
   armor?: number;
   weapon?: number;
   alive?: boolean;

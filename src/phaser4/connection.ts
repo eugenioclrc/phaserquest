@@ -9,6 +9,8 @@ type Initialization = {
   stamp: number;
   player: PlayerSnapshot;
   nbconnected: number;
+  nbAOIhorizontal: number;
+  lastAOIid: number;
 };
 
 type Update = {
@@ -36,12 +38,13 @@ type ClientEvents = {
 };
 
 type ConnectionEvents = {
-  enter(player: PlayerSnapshot): void;
+  enter(player: PlayerSnapshot, nbAOIhorizontal: number, lastAOIid: number): void;
   updateWorld(update: WorldUpdate): void;
   updateSelf(update: PersonalUpdate): void;
   reset(tile: Tile): void;
   say(id: number, text: string): void;
   online(count: number): void;
+  pending(message: string): void;
   error(message: string): void;
 };
 
@@ -61,6 +64,11 @@ export function createConnection(events: ConnectionEvents) {
   let entered = false;
   let retry: number | undefined;
 
+  function cancelRetry() {
+    window.clearTimeout(retry);
+    retry = undefined;
+  }
+
   function requestEntry() {
     if (request && !entered && socket.connected) {
       socket.emit('init-world', { ...request, clientTime: Date.now() });
@@ -70,13 +78,20 @@ export function createConnection(events: ConnectionEvents) {
   socket.on('connect', requestEntry);
   socket.on('disconnect', () => {
     entered = false;
-    window.clearTimeout(retry);
+    cancelRetry();
+    if (request) events.pending('Connection lost. Reconnecting…');
   });
-  socket.on('connect_error', () => events.error('Could not connect to the game server. Retrying…'));
+  socket.on('connect_error', () => {
+    if (request) events.pending('Could not connect to the game server. Retrying…');
+  });
 
   socket.on('wait', () => {
-    window.clearTimeout(retry);
-    retry = window.setTimeout(requestEntry, 500);
+    if (!request || entered || retry !== undefined) return;
+    events.pending('Waiting for the game world…');
+    retry = window.setTimeout(() => {
+      retry = undefined;
+      requestEntry();
+    }, 500);
   });
 
   socket.on('pid', (id) => {
@@ -89,12 +104,12 @@ export function createConnection(events: ConnectionEvents) {
   });
 
   socket.on('init', (payload) => {
-    if (!request) return;
-    window.clearTimeout(retry);
+    if (!request || entered) return;
+    cancelRetry();
     const data = unpack(payload, CoDec.initializationSchema);
     entered = true;
     socket.emit('ponq', data.stamp);
-    events.enter(data.player);
+    events.enter(data.player, data.nbAOIhorizontal, data.lastAOIid);
     events.online(data.nbconnected);
   });
 
@@ -110,8 +125,9 @@ export function createConnection(events: ConnectionEvents) {
   socket.on('reset', (tile) => { if (entered && tile) events.reset(tile); });
   socket.on('chat', ({ id, txt }) => { if (entered) events.say(id, txt); });
   socket.on('dbError', (error) => {
-    window.clearTimeout(retry);
-    if (!error?.retryable && request && !request.new && localStorage.getItem('playerID') === request.id) {
+    if (!request || entered) return;
+    cancelRetry();
+    if (!error?.retryable && !request.new && localStorage.getItem('playerID') === request.id) {
       for (const key of ['playerID', 'name', 'armor', 'weapon']) localStorage.removeItem(key);
     }
     request = null;
@@ -139,13 +155,15 @@ export function createConnection(events: ConnectionEvents) {
       if (socket.connected) requestEntry();
       else socket.connect();
     },
-    move(path: Tile[], orientation: number) {
-      if (entered && path.length > 1 && path.length <= 60) {
-        socket.emit('path', { path, action: { action: 0 }, or: orientation });
-      }
+    move(path: Tile[], orientation: number): boolean {
+      if (!entered || !socket.connected || path.length < 2 || path.length > 60) return false;
+      socket.emit('path', { path, action: { action: 0 }, or: orientation });
+      return true;
     },
-    chat(text: string) {
-      if (entered && text.trim() && text.length <= 300) socket.emit('chat', text);
+    chat(text: string): boolean {
+      if (!entered || !socket.connected || !text.trim() || text.length > 300) return false;
+      socket.emit('chat', text);
+      return true;
     },
   };
 }
