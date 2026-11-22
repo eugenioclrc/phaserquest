@@ -5,7 +5,6 @@
 const fs = require('fs');
 const path = require('path');
 const PF = require('pathfinding');
-const clone = require('clone'); // used to clone objects, essentially used for clonick update packets
 const rwc = require('random-weighted-choice'); // used to randomly decide which loot a monster should drop
 
 const assetsDir = path.join(__dirname, '..', '..', 'assets');
@@ -40,13 +39,14 @@ module.exports.GameServer = GameServer;
 module.exports.randomInt = randomInt;
 
 const { ObjectId } = require('mongodb');
-const spaceMap = require('../spaceMap.js').spaceMap;
+const { spaceMap } = require('../../shared/spaceMap.ts');
 const ChestArea = require('./chestarea.js').ChestArea;
-const AOIutils = require('../AOIutils.js').AOIutils;
+const { AOIutils } = require('../../shared/AOIutils.ts');
 const AOI = require('./AOI.js').AOI;
 const Player = require('./Player.js').Player;
 const Monster = require('./Monster.js').Monster;
 const Item = require('./Item.js').Item;
+const UpdatePacket = require('./UpdatePacket.js');
 
 // A few helper functions
 GameServer.addPlayerID = function (socketID, playerID) { // map a socket id to a player id
@@ -681,7 +681,7 @@ GameServer.updatePlayers = function () { // Function responsible for setting up 
     const player = GameServer.players[key];
     const localPkg = player.getIndividualUpdatePackage(); // the local pkg is player-specific
     const globalPkg = GameServer.AOIs[player.aoi].getUpdatePacket(); // the global pkg is AOI-specific
-    let individualGlobalPkg = clone(globalPkg, false); // clone the global pkg to be able to modify it without affecting the original
+    let individualGlobalPkg = Object.assign(new UpdatePacket(), structuredClone(globalPkg));
         // player.newAOIs is the list of AOIs about which the player hasn't checked for updates yet
     for (let i = 0; i < player.newAOIs.length; i++) {
       individualGlobalPkg.synchronize(GameServer.AOIs[player.newAOIs[i]]); // fetch updates from the new AOIs

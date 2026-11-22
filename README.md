@@ -15,6 +15,8 @@ bun run dev
 
 Open [http://127.0.0.1:8081](http://127.0.0.1:8081). Vite reloads the browser when client code changes, and Bun restarts the game server when server code changes. Both use the same port.
 
+Open [the Phaser 4 preview](http://127.0.0.1:8081/phaser4.html) to create or load a character, explore the map, and chat with nearby players. It uses the same server and saves as the classic client. Run `bun run typecheck` to check the TypeScript modules and `bun test` to verify the binary protocol.
+
 MongoDB defaults to `mongodb://127.0.0.1:27017` and the `phaserQuest` database. Set `MONGODB_URI` or `MONGODB_DB` to change those settings. Set `PORT` to change the HTTP port and `HOST` to change the bind address. Development binds to `127.0.0.1` by default. The existing `-p` and `--mongoPort` options also work, for example `bun run dev -p 8082 --mongoPort 27018`.
 
 ## Production
@@ -24,12 +26,13 @@ bun run build
 bun run start
 ```
 
-The build writes the browser bundle to `dist/`. The game server serves the bundle and the game assets alongside Socket.IO. Keep `dist/`, `assets/`, and the server code together when deploying. After building, runtime dependencies can be installed with `bun install --frozen-lockfile --production`.
+The build writes the browser bundle to `dist/`. The game server serves the bundle and the game assets alongside Socket.IO. Keep `dist/`, `assets/`, `shared/`, and the server code together when deploying. After building, runtime dependencies can be installed with `bun install --frozen-lockfile --production`.
 
 ## Code layout
 
 - `src/entry-game.js` registers the Phaser home and gameplay states.
 - `src/Game.js` handles gameplay rendering and input. `src/Client.js` exchanges updates with the server.
+- `src/phaser4/` contains the Phaser 4 preview scene, browser controls, and Socket.IO adapter.
 - `server.js` starts HTTP, Socket.IO, and MongoDB. `js/server/GameServer.js` runs the world simulation and persists characters.
 
 ## Further documentation

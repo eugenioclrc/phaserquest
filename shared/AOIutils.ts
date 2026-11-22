@@ -1,7 +1,7 @@
 const AOIutils = {
   nbAOIhorizontal: 0,
   lastAOIid: 0,
-  listAdjacentAOIs(current) {
+  listAdjacentAOIs(current: number): number[] {
     const AOIs = [];
     const isAtTop = (current < AOIutils.nbAOIhorizontal);
     const isAtBottom = (current > AOIutils.lastAOIid - AOIutils.nbAOIhorizontal);
@@ -20,4 +20,4 @@ const AOIutils = {
   },
 };
 
-export default AOIutils;
+export { AOIutils };

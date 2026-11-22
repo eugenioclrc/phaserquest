@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phaser Quest | Phaser 4 Preview</title>
+  <link rel="stylesheet" href="/src/phaser4/preview.css">
+</head>
+<body>
+  <main class="game-page">
+    <header class="game-header">
+      <h1>Phaser Quest</h1>
+      <a href="/">Classic client</a>
+    </header>
+
+    <form id="character-form" class="character-form" aria-label="Choose a character">
+      <div class="character-field">
+        <label id="character-label" for="character-name">Character name</label>
+        <input id="character-name" name="character" required maxlength="20" autocomplete="off" spellcheck="false">
+      </div>
+      <button id="play-button" type="submit" disabled>Play</button>
+    </form>
+
+    <p id="status" role="status"></p>
+    <div id="phaser4-game" role="region" aria-label="Game world"></div>
+
+    <section id="game-hud" class="game-hud" aria-label="Player controls" hidden>
+      <dl class="game-stats">
+        <div><dt>Health</dt><dd id="hero-health">100</dd></div>
+        <div><dt>Players</dt><dd id="players-online">0</dd></div>
+      </dl>
+
+      <form id="chat-form" class="chat-form">
+        <label for="chat-message">Chat</label>
+        <input id="chat-message" name="message" required maxlength="300" autocomplete="off" enterkeyhint="send" placeholder="Message nearby players">
+        <button type="submit">Send</button>
+      </form>
+    </section>
+  </main>
+  <script type="module" src="/src/phaser4/main.ts"></script>
+</body>
+</html>

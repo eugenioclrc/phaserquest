@@ -5,11 +5,10 @@ const { parseArgs } = require('node:util');
 const express = require('express');
 const { Server } = require('socket.io');
 const { MongoClient } = require('mongodb');
-const quickselect = require('quickselect');
 
 const gs = require('./js/server/GameServer.js').GameServer;
-const CoDec = require('./js/CoDec.js').CoDec;
-const Encoder = require('./js/server/Encoder.js');
+const { CoDec } = require('./shared/CoDec.ts');
+const Encoder = require('./js/server/Encoder.ts');
 
 const { values: options } = parseArgs({
   options: {
@@ -85,7 +84,8 @@ io.on('connection', (socket) => {
     if (delta < 0) delta = 0;
     socket.pings.push(delta); // socket.pings is the list of the 20 last latencies
     if (socket.pings.length > 20) socket.pings.shift(); // keep the size down to 20
-    socket.latency = server.quickMedian(socket.pings.slice(0)); // quickMedian used the quickselect algorithm to compute the median of a list of values
+    const sortedPings = socket.pings.toSorted((a, b) => a - b);
+    socket.latency = sortedPings[Math.floor((sortedPings.length - 1) / 2)];
   });
 
   socket.on('init-world', async (data) => {
@@ -172,13 +172,6 @@ server.addStamp = function (pkg) {
 
 server.getShortStamp = function () {
   return parseInt(Date.now().toString().substr(-9));
-};
-
-server.quickMedian = function (arr) { // Compute the median of an array using the quickselect algorithm
-  const l = arr.length;
-  const n = (l % 2 == 0 ? (l / 2) - 1 : (l - 1) / 2);
-  quickselect(arr, n);
-  return arr[n];
 };
 
 start().catch((err) => {

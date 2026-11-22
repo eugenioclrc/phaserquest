@@ -13,8 +13,8 @@ import Item from './Item';
 import Monster from './Monster';
 import NPC from './NPC';
 import Home from './Home';
-import spaceMap from './spaceMap';
-import AOIutils from './AOIutils';
+import { spaceMap } from '../shared/spaceMap.ts';
+import { AOIutils } from '../shared/AOIutils.ts';
 
 const Game = {
   // size of the gray border of the game window

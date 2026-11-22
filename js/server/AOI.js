@@ -4,7 +4,7 @@
 
 const GameServer = require('./GameServer.js').GameServer;
 const UpdatePacket = require('./UpdatePacket.js');
-const AOIutils = require('../AOIutils.js').AOIutils;
+const { AOIutils } = require('../../shared/AOIutils.ts');
 
 class AOI {
   constructor(x, y, w, h) {

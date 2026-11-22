@@ -4,7 +4,6 @@
 
 // https://github.com/bjorn/tiled/wiki/JSON-Map-Format
 const fs = require('fs');
-const clone = require('clone');
 
 class Layer {
   constructor(w, h, name, level) {
@@ -72,7 +71,7 @@ function formatMap() {
       } else if (layer.type === 'objectgroup') {
         if (layer.name == 'doors' || layer.name == 'entities') {
           if (layer.name == 'entities') {
-            clientObjectLayers.push(filterEntities(clone(layer)));
+            clientObjectLayers.push(filterEntities(structuredClone(layer)));
           } else {
             clientObjectLayers.push(layer);
           }
@@ -166,7 +165,7 @@ function breakMap(map) {
   lastID = 2;
 
   for (let aoi = 0; aoi <= lastID; aoi++) {
-    const subMap = clone(map);
+    const subMap = structuredClone(map);
     const x = (aoi % nbAOIhoriz) * AOIwidth;
     const y = Math.floor(aoi / nbAOIhoriz) * AOIheight;
     const liststart = AOIwidth * nbAOIhoriz * y + x;  // At which index in the list corresponds the top left tile of the submap

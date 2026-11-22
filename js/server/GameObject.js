@@ -3,7 +3,7 @@
  */
 
 const GameServer = require('./GameServer.js').GameServer;
-const AOIutils = require('../AOIutils.js').AOIutils;
+const { AOIutils } = require('../../shared/AOIutils.ts');
 
 // Parent class of all game objects : players, monsters and items (not NPC
 // because they are not processed server-side)

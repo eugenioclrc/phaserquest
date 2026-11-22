@@ -1,0 +1,179 @@
+@font-face {
+  font-family: Advocut;
+  src: url('/assets/fonts/advocut-webfont.ttf') format('truetype');
+  font-display: swap;
+}
+
+:root {
+  --ink: #271a13;
+  --text: #fff2d6;
+  --parchment: #f3e1b9;
+  --hearth: #302219;
+  --gold: #f2c66f;
+  --trim: #876543;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--text);
+  background: radial-gradient(circle 1200px at center, transparent, #000), url('/assets/sprites/wood.png') repeat, var(--ink);
+  font: 1rem/1.4 system-ui, sans-serif;
+}
+
+.game-page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1.25rem 0 2rem;
+  width: calc(100% - 1.5rem);
+}
+
+.game-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .25rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.game-header h1 {
+  margin: 0;
+  color: var(--gold);
+  font: 400 clamp(1.9rem, 5vw, 2.65rem)/1.1 Advocut, monospace;
+  text-shadow: 0 2px 2px #170c06;
+}
+
+.game-header a {
+  color: var(--text);
+  text-underline-offset: .2em;
+}
+
+.character-form {
+  display: flex;
+  align-items: flex-end;
+  gap: .75rem;
+  max-width: 26rem;
+  margin: 0 auto 1rem;
+  padding: .85rem;
+  color: var(--ink);
+  background: var(--parchment);
+  border: 2px solid var(--trim);
+  box-shadow: 0 2px 6px #160e08;
+}
+
+.character-field {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: .3rem;
+}
+
+label, dt {
+  font-weight: 600;
+}
+
+input, button {
+  min-height: 44px;
+  border: 1px solid var(--trim);
+  border-radius: 3px;
+  color: var(--ink);
+  font: inherit;
+}
+
+input {
+  width: 100%;
+  min-width: 0;
+  padding: .45rem .65rem;
+  background: #fffaf0;
+}
+
+button {
+  padding: .45rem .85rem;
+  background: var(--gold);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #ffdc93;
+}
+
+button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+:focus-visible {
+  outline: 2px solid #fff2bd;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+#status {
+  margin: 0 0 .75rem;
+  text-align: center;
+}
+
+#status:empty {
+  margin: 0;
+}
+
+#phaser4-game {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 980 / 500;
+  overflow: hidden;
+  background: #201710;
+  box-shadow: 0 0 0 2px var(--trim), 0 3px 12px #160e08;
+  cursor: url('/assets/sprites/hand.png'), auto;
+}
+
+#phaser4-game canvas {
+  display: block;
+}
+
+.game-hud {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem 1rem;
+  margin-top: .65rem;
+  padding: .6rem .75rem;
+  background: var(--hearth);
+  border: 1px solid var(--trim);
+}
+
+.game-stats {
+  display: flex;
+  gap: .85rem;
+  margin: 0;
+}
+
+.game-stats div {
+  display: flex;
+  align-items: baseline;
+  gap: .3rem;
+}
+
+.game-stats dd {
+  margin: 0;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-form {
+  display: flex;
+  flex: 1 1 17rem;
+  align-items: center;
+  gap: .5rem;
+  min-width: 0;
+}

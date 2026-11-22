@@ -3,9 +3,9 @@
  */
 
 import { io } from 'socket.io-client';
-import CoDec from './CoDec';
+import { CoDec } from '../shared/CoDec.ts';
 import Game from './Game';
-import Decoder from './Decoder';
+import Decoder from './Decoder.ts';
 
 const Client = {
   eventsQueue: [],

@@ -1,12 +1,14 @@
 /**
  * Created by Jerome on 13-01-17.
  */
-const CoDec = require('../CoDec.js').CoDec;
+import { CoDec, type ByteWidth, type ObjectSchema, type Packet } from '../../shared/CoDec.ts';
+
+const unsignedSetters = { 1: 'setUint8', 2: 'setUint16', 4: 'setUint32' } as const;
 
 // This class is used for the binary encoding of an update package
 
 // Encode an object according to a specific schema
-function encode(obj, schema) {
+function encode(obj: Packet, schema: ObjectSchema): ArrayBuffer {
   // Compute the number of bytes needed to encode the object according to the
   // provided schema, so that a buffer of the appropate size can be created
   const size = computeSize(obj, schema);
@@ -16,67 +18,70 @@ function encode(obj, schema) {
   return encodeResult.buffer;
 }
 
-function computeSize(obj, schema) {
+function computeSize(obj: Packet, schema: ObjectSchema): number {
   // Allocate bytes for the header indicating the presence/absence of fields in the object
   let size = schema.propertiesBytes;
 
   if (schema.numerical) {
     // Count the bytes needed for numerical values
-    Object.keys(schema.numerical).forEach((key) => {
+    for (const [key, width] of Object.entries(schema.numerical)) {
       // If the object to encode has that field, allocate the corresponding amount of bytes
-      if (obj[key] !== undefined) size += schema.numerical[key];
-    });
+      if (obj[key] !== undefined) size += width;
+    }
   }
 
   if (schema.strings) {
         // Count the bytes need for each string
-    schema.strings.forEach((key) => {
+    for (const key of schema.strings) {
       // bytesPerChar bytes per character + 1 byte to indicate the length of the string
-      if (obj[key] !== undefined && obj[key] !== null) {
-        size += (obj[key].length * CoDec.bytesPerChar) + 1;
+      const value = obj[key] as string | null | undefined;
+      if (value !== undefined && value !== null) {
+        size += (value.length * CoDec.bytesPerChar) + 1;
       }
-    });
+    }
   }
 
   if (schema.arrays) {
         // Iterate over all lists of objetcs
-    Object.keys(schema.arrays).forEach((arrayOfObjects) => {
+    for (const [key, sc] of Object.entries(schema.arrays)) {
       // For each list, iterate over the its content
       // If the object to encode has the property
-      if (obj[arrayOfObjects] !== undefined) {
+      const values = obj[key] as (Packet | number)[] | undefined;
+      if (values !== undefined) {
         size += 1;
-        const sc = schema.arrays[arrayOfObjects];
-        obj[arrayOfObjects].forEach((subObject) => {
+        values.forEach((subObject) => {
           if (sc.primitive) {
             if (sc.type === 'int') {
               size += sc.bytes;
             }
           } else {
             // Recursively compute the size for sub-objects to encode
-            size += computeSize(subObject, sc);
+            size += computeSize(subObject as Packet, sc);
           }
         });
       }
-    });
+    }
   }
 
   if (schema.maps) {
-    Object.keys(schema.maps).forEach((map) => {
-      if (obj[map] !== undefined) {
+    for (const [key, sc] of Object.entries(schema.maps)) {
+      const values = obj[key] as Record<string, Packet> | undefined;
+      if (values !== undefined) {
         size += 1; // One byte for number of objects
-        Object.keys(obj[map]).forEach((subObjectKey) => {
+        for (const value of Object.values(values)) {
           size += CoDec.bytesPerID;
           // Recursively compute the size for sub-objects to encode
-          size += computeSize(obj[map][subObjectKey], schema.maps[map]);
-        });
+          size += computeSize(value, sc);
+        }
       }
-    });
+    }
   }
 
   if (schema.standAlone) {
-    Object.keys(schema.standAlone).forEach((objName) => {
-      if (obj[objName] !== undefined) size += computeSize(obj[objName], schema.standAlone[objName]);
-    });
+    for (const [key, sc] of Object.entries(schema.standAlone)) {
+      const value = obj[key] as Packet | undefined;
+      if (value !== undefined) size += computeSize(value, sc);
+    }
   }
 
   size += CoDec.booleanBytes;
@@ -84,9 +89,15 @@ function computeSize(obj, schema) {
   return size;
 }
 
-function encodeObject(obj, size, schema, buf, offset) {
+function encodeObject(
+  obj: Packet,
+  size: number | null,
+  schema: ObjectSchema,
+  buf: ArrayBuffer | null,
+  offset: number,
+): { buffer: ArrayBuffer; offset: number } {
   // If first call, create a new buffer ; if recursive call, use provided buffer
-  const buffer = (buf || new ArrayBuffer(size));
+  const buffer = buf ?? new ArrayBuffer(size ?? 0);
   const dv = new DataView(buffer);
   // Position where the header byte(s) will be written
   const headerOffset = offset;
@@ -96,97 +107,101 @@ function encodeObject(obj, size, schema, buf, offset) {
   let propertiesMask = 0;
 
   if (schema.numerical) {
-    Object.keys(schema.numerical).forEach((key) => {
-      if (obj[key] !== undefined) {
+    for (const [key, width] of Object.entries(schema.numerical)) {
+      const value = obj[key] as number | undefined;
+      if (value !== undefined) {
         // console.log("Encoding "+key+" at offset "+offset);
-        offset = encodeBytes(dv, offset, schema.numerical[key], obj[key]);
+        offset = encodeBytes(dv, offset, width, value);
         // Indicate in the mask that the field is present
         propertiesMask |= 1;
       }
       propertiesMask <<= 1;
-    });
+    }
   }
 
   if (schema.strings) {
-    schema.strings.forEach((key) => {
-      if (obj[key] !== undefined) {
-        const length = obj[key].length;
+    for (const key of schema.strings) {
+      const value = obj[key] as string | undefined;
+      if (value !== undefined) {
+        const length = value.length;
         // console.log("Encoding length at offset "+offset);
         offset = encodeBytes(dv, offset, 1, length);
         // console.log("Encoding "+key+" at offset "+offset);
-        encodeString(dv, offset, obj[key]);
+        encodeString(dv, offset, value);
         offset += (length * CoDec.bytesPerChar);
         propertiesMask |= 1;
       }
       propertiesMask <<= 1;
-    });
+    }
   }
 
   if (schema.arrays) {
     // Iterate over all lists of objetcs
-    Object.keys(schema.arrays).forEach((arrayOfObjects) => {
+    for (const [key, sc] of Object.entries(schema.arrays)) {
       // For each list, iterate over the its content
-      if (obj[arrayOfObjects] !== undefined) {
+      const values = obj[key] as (Packet | number)[] | undefined;
+      if (values !== undefined) {
         // Number of objects in the array (length of the array)
-        offset = encodeBytes(dv, offset, 1, obj[arrayOfObjects].length);
+        offset = encodeBytes(dv, offset, 1, values.length);
         propertiesMask |= 1;
-        const sc = schema.arrays[arrayOfObjects];
-        obj[arrayOfObjects].forEach((subObject) => {
-          // console.log("***Encoding "+arrayOfObjects+" element at offset "+offset);
+        values.forEach((subObject) => {
           if (sc.primitive) {
             if (sc.type === 'int') {
-              offset = encodeBytes(dv, offset, sc.bytes, subObject);
+              offset = encodeBytes(dv, offset, sc.bytes, subObject as number);
             }
           } else {
-            const res = encodeObject(subObject, null, sc, buffer, offset);
+            const res = encodeObject(subObject as Packet, null, sc, buffer, offset);
             offset = res.offset;
           }
         });
       }
       propertiesMask <<= 1;
-    });
+    }
   }
 
   if (schema.maps) {
-    Object.keys(schema.maps).forEach((map) => {
-      if (obj[map] !== undefined) {
+    for (const [key, sc] of Object.entries(schema.maps)) {
+      const values = obj[key] as Record<string, Packet> | undefined;
+      if (values !== undefined) {
         // Number of entries in the map
-        offset = encodeBytes(dv, offset, 1, Object.keys(obj[map]).length);
+        const entries = Object.entries(values);
+        offset = encodeBytes(dv, offset, 1, entries.length);
         propertiesMask |= 1;
-        Object.keys(obj[map]).forEach((subObjectKey) => {
-          offset = encodeBytes(dv, offset, CoDec.bytesPerID, subObjectKey);
-          // console.log("***Encoding "+map+" element at offset "+offset);
-          const res = encodeObject(obj[map][subObjectKey], null, schema.maps[map], buffer, offset);
+        for (const [id, value] of entries) {
+          offset = encodeBytes(dv, offset, CoDec.bytesPerID, Number(id));
+          const res = encodeObject(value, null, sc, buffer, offset);
           offset = res.offset;
-        });
+        }
       }
       propertiesMask <<= 1;
-    });
+    }
   }
 
   if (schema.standAlone) {
-    Object.keys(schema.standAlone).forEach((objName) => {
-      if (obj[objName] !== undefined) {
-        const res = encodeObject(obj[objName], null, schema.standAlone[objName], buffer, offset);
+    for (const [key, sc] of Object.entries(schema.standAlone)) {
+      const value = obj[key] as Packet | undefined;
+      if (value !== undefined) {
+        const res = encodeObject(value, null, sc, buffer, offset);
         offset = res.offset;
         propertiesMask |= 1;
       }
       propertiesMask <<= 1;
-    });
+    }
   }
 
   if (schema.booleans) {
     let bools = 0;
-    schema.booleans.forEach((key) => {
-      if (obj[key] !== undefined) {
+    for (const key of schema.booleans) {
+      const value = obj[key] as boolean | undefined;
+      if (value !== undefined) {
         // Indicate in the mast that the boolean is present
         propertiesMask |= 1;
         // Indicate its actual value
-        bools |= +obj[key];
+        bools |= +value;
       }
       propertiesMask <<= 1;
       bools <<= 1;
-    });
+    }
     // console.log("Encoding bool stuff at offset "+offset+" for size "+dv.byteLength);
     bools >>= 1;
     offset = encodeBytes(dv, offset, CoDec.booleanBytes, bools);
@@ -194,27 +209,21 @@ function encodeObject(obj, size, schema, buf, offset) {
   propertiesMask >>= 1;
   // console.log(propertiesMask.toString(2));
   // Write the header byte
-  dv[`setUint${schema.propertiesBytes * 8}`](headerOffset, propertiesMask);
+  encodeBytes(dv, headerOffset, schema.propertiesBytes, propertiesMask);
   return { buffer, offset };
 }
 
-function encodeBytes(dv, offset, nbBytes, value) {
-  dv[`setUint${nbBytes * 8}`](offset, value);
+function encodeBytes(dv: DataView, offset: number, nbBytes: ByteWidth, value: number): number {
+  dv[unsignedSetters[nbBytes]](offset, value);
   offset += nbBytes;
   return offset;
 }
 
-function encodeString(dv, offset, str) {
+function encodeString(dv: DataView, offset: number, str: string): void {
   for (let i = 0, strLen = str.length; i < strLen; i += 1) {
     // console.log(str.charAt(i)+', '+str.charCodeAt(i));
-    dv[`setUint${CoDec.bytesPerChar * 8}`](offset, str.charCodeAt(i));
-    offset += CoDec.bytesPerChar;
+    offset = encodeBytes(dv, offset, CoDec.bytesPerChar, str.charCodeAt(i));
   }
 }
 
-module.exports = {
-  encode,
-  computeSize,
-  encodeObject,
-  encodeBytes,
-  encodeString };
+export { encode, computeSize, encodeObject, encodeBytes, encodeString };
