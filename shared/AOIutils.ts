@@ -1,6 +1,11 @@
 const AOIutils = {
+  tileWidth: 34,
+  tileHeight: 20,
   nbAOIhorizontal: 0,
   lastAOIid: 0,
+  idFromCoords(x: number, y: number): number {
+    return Math.floor(x / AOIutils.tileWidth) + AOIutils.nbAOIhorizontal * Math.floor(y / AOIutils.tileHeight);
+  },
   listAdjacentAOIs(current: number): number[] {
     const AOIs = [];
     const isAtTop = (current < AOIutils.nbAOIhorizontal);

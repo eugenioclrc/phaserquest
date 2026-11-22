@@ -27,11 +27,23 @@ export interface MonsterSnapshot extends Tile {
   route?: { path: Tile[]; delta: number };
 }
 
+export interface ItemSnapshot extends Tile {
+  id: number;
+  itemID: number;
+  visible: boolean;
+  respawn: boolean;
+  chest: boolean;
+  inChest: boolean;
+  loot: boolean;
+}
+
 export interface WorldUpdate {
   newplayers?: PlayerSnapshot[];
   players?: Record<number, Partial<PlayerSnapshot>>;
   newmonsters?: MonsterSnapshot[];
   monsters?: Record<number, Partial<MonsterSnapshot>>;
+  newitems?: ItemSnapshot[];
+  items?: Record<number, Partial<ItemSnapshot>>;
   disconnected?: number[];
 }
 
@@ -41,4 +53,6 @@ export interface PersonalUpdate {
   life?: number;
   hp?: { hp: number; target: boolean; from?: number }[];
   killed?: number[];
+  used?: number[];
+  noPick?: boolean;
 }

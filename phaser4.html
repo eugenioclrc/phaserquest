@@ -29,6 +29,10 @@
         <div><dt>Health</dt><dd><meter id="health-meter" aria-label="Health" min="0" max="100" value="100"></meter> <span id="hero-health">100</span></dd></div>
         <div><dt>Players</dt><dd id="players-online">0</dd></div>
       </dl>
+      <dl class="game-stats">
+        <div><dt>Armor</dt><dd id="hero-armor">Cloth Armor</dd></div>
+        <div><dt>Weapon</dt><dd id="hero-weapon">Sword 1</dd></div>
+      </dl>
       <button id="revive-button" type="button" hidden>Revive</button>
 
       <form id="chat-form" class="chat-form">
@@ -36,6 +40,7 @@
         <input id="chat-message" name="message" required maxlength="300" autocomplete="off" enterkeyhint="send" placeholder="Message nearby players">
         <button type="submit">Send</button>
       </form>
+      <output id="loot-notice" hidden></output>
     </section>
   </main>
   <script type="module" src="/src/phaser4/main.ts"></script>

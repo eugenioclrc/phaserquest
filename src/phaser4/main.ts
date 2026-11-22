@@ -15,6 +15,8 @@ const gameHud = element<HTMLElement>('game-hud');
 const online = element<HTMLElement>('players-online');
 const health = element<HTMLElement>('hero-health');
 const healthMeter = element<HTMLMeterElement>('health-meter');
+const equipment = { armor: element('hero-armor'), weapon: element('hero-weapon') };
+const lootNotice = element<HTMLOutputElement>('loot-notice');
 const reviveButton = element<HTMLButtonElement>('revive-button');
 const chatForm = element<HTMLFormElement>('chat-form');
 const chatMessage = element<HTMLInputElement>('chat-message');
@@ -40,6 +42,11 @@ const world = new WorldScene(
     reviveButton.disabled = false;
     showHealth(alive ? 100 : 0);
   },
+  (slot, key) => {
+    localStorage.setItem(slot, key);
+    equipment[slot].textContent = key.replace(/(.)(armor|sword|\d+)$/, '$1 $2')
+      .replace(/\b\w/g, letter => letter.toUpperCase());
+  },
 );
 
 function showHealth(life: number) {
@@ -60,12 +67,20 @@ const connection = createConnection({
     characterForm.hidden = true;
     gameHud.hidden = false;
     showHealth(player.alive === false ? 0 : 100);
+    lootNotice.value = '';
+    lootNotice.hidden = true;
     setStatus('');
   },
   updateWorld: update => world.applyWorld(update),
   updateSelf(update) {
     world.applySelf(update);
     if (update.life !== undefined) showHealth(update.life);
+    const notices = (update.used ?? []).map(id => world.itemInfo(id)?.msg).filter(Boolean);
+    if (update.noPick) notices.push('You already have better equipment!');
+    if (notices.length) {
+      lootNotice.hidden = false;
+      lootNotice.value = notices.join(' ');
+    }
   },
   reset: tile => world.reset(tile),
   say: (id, text) => world.say(id, text),

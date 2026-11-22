@@ -27,8 +27,6 @@ const GameServer = {
   lastItemID: 0, // ID of the last item object created
   lastMonsterID: 0,
   lastPlayerID: 0,
-  AOIwidth: 34, // width in tiles of each AOI ; 6 AOIs horizontally in total
-  AOIheight: 20, // height in tiles of each AOI ; 16 AOIs vertically in total
   nbConnectedChanged: false, // has the number of connected players changed since last update packet or not
   players: {}, // map of all connected players, fetchable by id
   socketMap: {}, // map of socket id's to the player id's of the associated players
@@ -110,7 +108,8 @@ GameServer.readMap = function () {
     }
 
         // Iterate over all tiles and work out AOIs and collisions
-    AOIutils.nbAOIhorizontal = Math.ceil(GameServer.map.width / GameServer.AOIwidth);
+    const { tileWidth, tileHeight } = AOIutils;
+    AOIutils.nbAOIhorizontal = Math.ceil(GameServer.map.width / tileWidth);
     GameServer.AOIs = {}; // Maps AOI id to AOI object
     GameServer.dirtyAOIs = new Set(); // Set of AOI's whose update package have changes since last update
     GameServer.AOIfromTiles = new spaceMap(); // map tiles coordinates to AOI id (e.g. the tile (3,2) is in AOI 0)
@@ -119,11 +118,11 @@ GameServer.readMap = function () {
       const col = [];
       for (let x = 0; x < GameServer.map.width; x++) {
                 // Work out AOI
-        if (x % GameServer.AOIwidth == 0 && y % GameServer.AOIheight == 0) { // Create a new AOI at these coordinates
-          const area = new AOI(x, y, GameServer.AOIwidth, GameServer.AOIheight);
+        if (x % tileWidth == 0 && y % tileHeight == 0) { // Create a new AOI at these coordinates
+          const area = new AOI(x, y, tileWidth, tileHeight);
           GameServer.AOIs[area.id] = area;
         }
-        GameServer.AOIfromTiles.add(x, y, GameServer.AOIs[getIDfromCoords(x, y)]);
+        GameServer.AOIfromTiles.add(x, y, GameServer.AOIs[AOIutils.idFromCoords(x, y)]);
                 // Work out collisions
         let collide = false;
         for (var l = 0; l < GameServer.layers.length; l++) {
@@ -500,7 +499,7 @@ GameServer.handlePath = function (path, action, orientation, socket) { // Proces
     return false;
   }
 
-  if (manhattanDistance(path[0].x, path[0].y, path[path.length - 1].x, path[path.length - 1].y) > GameServer.AOIheight + 8) {
+  if (manhattanDistance(path[0].x, path[0].y, path[path.length - 1].x, path[path.length - 1].y) > AOIutils.tileHeight + 8) {
         // Same ; used to prevent travelling through more than two AOI's at once, because the AOI-related updates take place only when a path is finished
     console.log('Distance too big');
     console.log(manhattanDistance(path[0].x, path[0].y, path[path.length - 1].x, path[path.length - 1].y));
@@ -594,7 +593,7 @@ GameServer.checkAction = function (player) {
       if (player.target !== monster) player.setTarget(monster);
       if (!GameServer.areFighting(player, monster)) GameServer.setUpFight(player, monster);
     } else if (action.action == 4) { // chest
-      const chest = GameServer.items.getFirstFiltered(action.x, action.y, ['visible', 'chest']);
+      const chest = GameServer.items.getFirstFiltered(action.x, action.y, ['visible', 'chest', 'inChest']);
       if (!chest) return;
       if (!GameServer.adjacent(chest, player)) return;
       chest.open();
@@ -771,11 +770,6 @@ function randomInt(low, high) {
 
 function manhattanDistance(xA, yA, xB, yB) {
   return Math.abs(xA - xB) + Math.abs(yA - yB);
-}
-
-function getIDfromCoords(x, y) {
-    // Map x and y coordinates to the id of the AOI that the tile will belong to
-  return Math.floor(x / GameServer.AOIwidth) + (AOIutils.nbAOIhorizontal * Math.floor(y / GameServer.AOIheight));
 }
 
 Array.prototype.diff = function (a) { // returns the elements in the array that are not in array a

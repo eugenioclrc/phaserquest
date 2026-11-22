@@ -1,12 +1,20 @@
 import * as Phaser from 'phaser4';
 import EasyStar from 'easystarjs';
 import { AOIutils } from '../../shared/AOIutils.ts';
-import type { PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
+import type { ItemSnapshot, PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
 import { MonsterView, type MonsterDefinition } from './MonsterView.ts';
 
 type Direction = 1 | 2 | 3 | 4;
 
-type Equipment = { id: number; key: string; offsets?: Tile };
+type ItemDefinition = {
+  id: number;
+  type?: number;
+  msg?: string;
+  offsets?: Tile;
+  customAnchor?: Tile;
+};
+
+type ItemView = { data: ItemSnapshot; sprite: Phaser.GameObjects.Image };
 
 type Door = {
   to: Tile;
@@ -68,8 +76,9 @@ export class WorldScene extends Phaser.Scene {
   private readonly avatars = new Map<number, Avatar>();
   private readonly monsters = new Map<number, MonsterView>();
   private readonly species = new Map<number, { key: string; definition: MonsterDefinition }>();
+  private readonly items = new Map<number, ItemView>();
+  private readonly itemDefinitions = new Map<number, ItemDefinition & { key: string }>();
   private damageLabels?: Phaser.GameObjects.Group;
-  private readonly equipment = new Map<number, Equipment>();
   private readonly doors = new Map<string, Door>();
   private readonly crossingsByDestination = new Map<string, DoorCrossing>();
   private readonly pathfinder = new EasyStar.js();
@@ -86,6 +95,7 @@ export class WorldScene extends Phaser.Scene {
     private readonly onReady: () => void,
     private readonly onPath: (path: Tile[], orientation: number, action?: PathAction) => boolean,
     private readonly onHeroAlive: (alive: boolean) => void,
+    private readonly onHeroEquipment: (slot: 'armor' | 'weapon', key: string) => void,
   ) {
     super('world');
   }
@@ -145,9 +155,9 @@ export class WorldScene extends Phaser.Scene {
     }
 
     const { items, monsters } = this.cache.json.get('db') as {
-      items: Record<string, Equipment>; monsters: Record<string, MonsterDefinition>;
+      items: Record<string, ItemDefinition>; monsters: Record<string, MonsterDefinition>;
     };
-    for (const item of Object.values(items)) this.equipment.set(item.id, item);
+    for (const [key, item] of Object.entries(items)) this.itemDefinitions.set(item.id, { ...item, key });
     for (const [key, definition] of Object.entries(monsters)) this.species.set(definition.id, { key, definition });
     this.damageLabels = this.add.group();
 
@@ -158,6 +168,7 @@ export class WorldScene extends Phaser.Scene {
       this.heroId = undefined;
       this.avatars.clear();
       this.monsters.clear();
+      this.items.clear();
     });
     this.onReady();
   }
@@ -171,6 +182,19 @@ export class WorldScene extends Phaser.Scene {
   }
 
   applyWorld(update: WorldUpdate) {
+    for (const item of update.newitems ?? []) {
+      let view = this.items.get(item.id);
+      if (!view) {
+        const sprite = this.add.image(0, 0, 'players', 'chest').setInteractive({ useHandCursor: true });
+        view = { data: { ...item }, sprite };
+        this.items.set(item.id, view);
+      }
+      this.updateItem(view, item);
+    }
+    for (const [key, changes] of Object.entries(update.items ?? {})) {
+      const view = this.items.get(Number(key));
+      if (view) this.updateItem(view, changes);
+    }
     for (const snapshot of update.newmonsters ?? []) {
       const current = this.monsters.get(snapshot.id);
       const species = this.species.get(snapshot.monster);
@@ -200,6 +224,13 @@ export class WorldScene extends Phaser.Scene {
     for (const [id, avatar] of this.avatars) {
       if (avatar.aoi !== undefined && !nearby.includes(avatar.aoi)) this.removeAvatar(id);
     }
+    for (const view of this.items.values()) {
+      if (!nearby.includes(AOIutils.idFromCoords(view.data.x, view.data.y))) this.removeItem(view);
+    }
+  }
+
+  itemInfo(id: number) {
+    return this.itemDefinitions.get(id);
   }
 
   applySelf(update: PersonalUpdate) {
@@ -287,6 +318,8 @@ export class WorldScene extends Phaser.Scene {
     for (const id of this.avatars.keys()) this.removeAvatar(id);
     for (const monster of this.monsters.values()) monster.sprite.destroy();
     this.monsters.clear();
+    for (const { sprite } of this.items.values()) sprite.destroy();
+    this.items.clear();
     this.damageLabels?.clear(true, true);
   }
 
@@ -313,6 +346,31 @@ export class WorldScene extends Phaser.Scene {
     if (width === this.outdoorWidth) return;
     this.outdoorWidth = width;
     this.cameras.main.setBounds(this.tileWidth - 10, this.tileHeight - 10, width, 311 * this.tileHeight);
+  }
+
+  private updateItem(view: ItemView, changes: Partial<ItemSnapshot>) {
+    const { data, sprite } = view;
+    Object.assign(data, changes);
+    if (!data.visible && !data.respawn) {
+      this.removeItem(view);
+      return;
+    }
+    const item = this.itemInfo(data.itemID);
+    const frame = data.inChest ? 'chest' : item && `${item.key}_0`;
+    const anchor = data.inChest ? undefined : item?.customAnchor;
+    const y = data.y * this.tileHeight;
+    sprite.setPosition(data.x * this.tileWidth, y).setDepth(y - 0.25);
+    if (frame && sprite.texture.has(frame)) {
+      sprite.setFrame(frame).setOrigin(anchor?.x ?? 0, anchor?.y ?? (data.inChest ? 0 : 0.25));
+      sprite.setVisible(data.visible);
+    } else {
+      sprite.setVisible(false);
+    }
+  }
+
+  private removeItem({ data, sprite }: ItemView) {
+    sprite.destroy();
+    this.items.delete(data.id);
   }
 
   private addAvatar(player: PlayerSnapshot): Avatar {
@@ -345,12 +403,16 @@ export class WorldScene extends Phaser.Scene {
   private updateAvatar(avatar: Avatar, changes: Partial<PlayerSnapshot>, isHero: boolean) {
     if (changes.aoi !== undefined) avatar.aoi = changes.aoi;
     if (changes.name !== undefined) avatar.name.setText(changes.name);
-    const armor = changes.armor === undefined ? undefined : this.equipment.get(changes.armor);
-    const weapon = changes.weapon === undefined ? undefined : this.equipment.get(changes.weapon);
-    if (armor) avatar.armorKey = armor.key;
-    if (weapon) {
+    const armor = changes.armor === undefined ? undefined : this.itemInfo(changes.armor);
+    const weapon = changes.weapon === undefined ? undefined : this.itemInfo(changes.weapon);
+    if (armor?.type === 2) {
+      avatar.armorKey = armor.key;
+      if (isHero) this.onHeroEquipment('armor', armor.key);
+    }
+    if (weapon?.type === 1) {
       avatar.weaponKey = weapon.key;
       if (weapon.offsets) avatar.weapon.setPosition(weapon.offsets.x, weapon.offsets.y);
+      if (isHero) this.onHeroEquipment('weapon', weapon.key);
     }
     if (changes.targetID !== undefined) avatar.targetID = changes.targetID;
     if (changes.inFight !== undefined) avatar.inFight = changes.inFight;
@@ -390,21 +452,30 @@ export class WorldScene extends Phaser.Scene {
     const hero = this.avatars.get(this.heroId);
     if (!hero?.alive) return;
     const at = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-    let end = { x: Math.floor(at.x / this.tileWidth), y: Math.floor(at.y / this.tileHeight) };
-    let action: PathAction = { action: 0 };
+    const clicked = { x: Math.floor(at.x / this.tileWidth), y: Math.floor(at.y / this.tileHeight) };
+    const target: { tile: Tile; action: PathAction; rank: number } = {
+      tile: clicked, action: { action: 0 }, rank: hits.length + 1,
+    };
+    const consider = (sprite: Phaser.GameObjects.Image, tile: Tile, action: PathAction) => {
+      // Phaser provides render-sorted hits. Tile matches are a fallback.
+      const hit = hits.indexOf(sprite);
+      const rank = hit >= 0 ? hit : hits.length;
+      if (rank >= target.rank || (hit < 0 && tileDistance(tile, clicked) !== 0)) return;
+      Object.assign(target, { tile, action, rank });
+    };
     for (const [id, monster] of this.monsters) {
-      if (monster.alive && (hits.includes(monster.sprite) || tileDistance(monster.tile, end) === 0)) {
-        action = { action: 3, id };
-        end = monster.tile;
-        break;
-      }
+      if (monster.alive) consider(monster.sprite, monster.tile, { action: 3, id });
     }
+    for (const { data, sprite } of this.items.values()) {
+      if (sprite.visible) consider(sprite, data, data.inChest ? { action: 4, x: data.x, y: data.y } : { action: 0 });
+    }
+    const { tile: end, action } = target;
     const start = this.tileAt(hero);
     if (tileDistance(start, end) > 28) return;
     const path = this.findPath(start, end);
     if (!path || path.length < 2) return;
     const orientation = directionBetween(path[path.length - 2], end);
-    if (action.action === 3) path.pop();
+    if (action.action !== 0) path.pop();
     if (path.length > 60 || !this.onPath(path, orientation, action)) return;
     this.move(hero, path, orientation);
   }
