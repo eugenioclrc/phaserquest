@@ -31,12 +31,6 @@ app.use('/assets', express.static(join(__dirname, 'assets')));
 app.get('/phaser4.html', (req, res) => {
   res.redirect('/');
 });
-app.get('/vendor/phaser.js', (req, res) => {
-  res.sendFile(require.resolve('phaser/build/phaser.min.js'));
-});
-app.get('/vendor/phaser-input.js', (req, res) => {
-  res.sendFile(join(__dirname, 'js/phaser-input.js'));
-});
 
 async function start() {
   const dist = join(__dirname, 'dist');

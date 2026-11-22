@@ -52,11 +52,6 @@ body {
   text-shadow: 0 2px 2px #170c06;
 }
 
-.game-header a {
-  color: var(--text);
-  text-underline-offset: .2em;
-}
-
 .character-form {
   display: flex;
   flex-wrap: wrap;

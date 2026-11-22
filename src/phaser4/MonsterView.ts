@@ -1,4 +1,4 @@
-import type * as Phaser from 'phaser4';
+import type * as Phaser from 'phaser';
 import type { MonsterSnapshot, Tile } from './protocol.ts';
 
 export type MonsterDefinition = {

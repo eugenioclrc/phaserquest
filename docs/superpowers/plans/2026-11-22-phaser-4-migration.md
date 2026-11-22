@@ -55,10 +55,10 @@ Para pruebas que requieren posiciones fijas, creá personajes en la base desecha
 
 **Interfaz** `encode(packet, schema)` devuelve el `ArrayBuffer` que consume `Decoder.decode(buffer, schema)`.
 
-- [ ] Registrar el diff actual y validar ambos clientes antes de iniciar la migración de paridad. Crear un personaje, moverlo, volver a entrar con el mismo ID y enviar chat entre perfiles usando la vista previa.
-- [ ] Dentro del test existente, fijar los bytes del paquete de actualización actual y agregar el paquete `init` que figura abajo. Comparar los bytes antes de decodificar y después comparar el objeto decodificado con el paquete original.
-- [ ] Ejecutar `bun test test/codec.test.ts`. Confirmar que pasa y que editar un byte esperado temporalmente produce un fallo. Restaurar el valor de referencia.
-- [ ] Guardar el punto de partida de la vista previa y el test de compatibilidad para las tareas siguientes.
+- [x] Registrar el diff actual y validar ambos clientes antes de iniciar la migración de paridad. Crear un personaje, moverlo, volver a entrar con el mismo ID y enviar chat entre perfiles usando la vista previa.
+- [x] Dentro del test existente, fijar los bytes del paquete de actualización actual y agregar el paquete `init` que figura abajo. Comparar los bytes antes de decodificar y después comparar el objeto decodificado con el paquete original.
+- [x] Ejecutar `bun test test/codec.test.ts`. Confirmar que pasa y que editar un byte esperado temporalmente produce un fallo. Restaurar el valor de referencia.
+- [x] Guardar el punto de partida de la vista previa y el test de compatibilidad para las tareas siguientes.
 
 El paquete `init` contiene `stamp: 123456789`, `nbconnected: 1`, `nbAOIhorizontal: 6`, `lastAOIid: 96` y `player: { id: 513, x: 0, y: 0, aoi: 0, name: 'Scout', inFight: false, alive: true }`.
 
@@ -73,11 +73,11 @@ El paquete `init` contiene `stamp: 123456789`, `nbconnected: 1`, `nbAOIhorizonta
 
 **Interfaz** Pasar `nbAOIhorizontal` y `lastAOIid` de `init` a `WorldScene.enter`. Añadir `aoi?: number` a `PlayerSnapshot` y a sus actualizaciones parciales. Hacer que `connection.move(path, orientation): boolean` indique si se envió la acción, y trasladar ese resultado a `WorldScene`.
 
-- [ ] Reproducir el cruce de zona que deja un avatar fuera del área visible en la vista previa. Con dos personajes, salir del área y sus vecinas y volver a entrar.
-- [ ] Aplicar `newplayers`, cambios de área y `disconnected` por ID de sesión. Retirar avatares fuera del vecindario y permitir su alta posterior sin duplicados. Tratar `aoi: 0` como un valor presente.
-- [ ] Tras perder la conexión, detener los envíos y la animación local de rutas nuevas hasta recibir una inicialización. Solicitar el ObjectId confirmado previamente y rehidratar la escena con el ID de sesión devuelto por `init`. Mantener un solo temporizador para `wait` y conservar el guardado ante `dbError` temporal.
-- [ ] Probar `wait` antes de `init` y un `dbError` con `retryable: true` usando datos de prueba. Comprobar una sola entrada al mundo y el mismo valor de `playerID` tras volver a intentar.
-- [ ] Verificar reconexión, recarga y cruce de zonas con clásico y Phaser 4 conectados al mismo servidor. Intentar mover al personaje durante la desconexión y comprobar que queda en su casilla. Verificar un único documento en MongoDB y que el chat funciona al volver al área.
+- [x] Reproducir el cruce de zona que deja un avatar fuera del área visible en la vista previa. Con dos personajes, salir del área y sus vecinas y volver a entrar.
+- [x] Aplicar `newplayers`, cambios de área y `disconnected` por ID de sesión. Retirar avatares fuera del vecindario y permitir su alta posterior sin duplicados. Tratar `aoi: 0` como un valor presente.
+- [x] Tras perder la conexión, detener los envíos y la animación local de rutas nuevas hasta recibir una inicialización. Solicitar el ObjectId confirmado previamente y rehidratar la escena con el ID de sesión devuelto por `init`. Mantener un solo temporizador para `wait` y conservar el guardado ante `dbError` temporal.
+- [x] Probar `wait` antes de `init` y un `dbError` con `retryable: true` usando datos de prueba. Comprobar una sola entrada al mundo y el mismo valor de `playerID` tras volver a intentar.
+- [x] Verificar reconexión, recarga y cruce de zonas con clásico y Phaser 4 conectados al mismo servidor. Intentar mover al personaje durante la desconexión y comprobar que queda en su casilla. Verificar un único documento en MongoDB y que el chat funciona al volver al área.
 
 ## Tarea 3. Cerrar movimiento, puertas y cámara
 
@@ -85,10 +85,10 @@ El paquete `init` contiene `stamp: 123456789`, `nbconnected: 1`, `nbAOIhorizonta
 
 **Interfaz** `WorldScene.reset(tile: Tile)` corrige la posición cuando responde el servidor. El cálculo de rutas devuelve `Tile[]` en las unidades que espera `path`.
 
-- [ ] Registrar en el clásico una ruta exterior y tres puertas de referencia del mapa. La entrada `(80, 211)` lleva a `(155, 311)` con cámara fija. La entrada `(71, 3)` lleva a `(155, 71)` con seguimiento acotado. La salida `(127, 120)` lleva a `(65, 125)` en exteriores.
-- [ ] Portar la orientación y los límites de cámara de cada puerta. Convertir las coordenadas de propiedades Tiled de texto a número. Preservar la colisión `c`, el orden de suelo, personajes y techos, y la separación entre casillas y píxeles. Mantener el límite de 60 nodos y 28 casillas Manhattan que comprueba el servidor.
-- [ ] Mostrar una indicación del destino y detener el movimiento local al aplicar un `reset`. Recalcular los límites del canvas al cambiar la posición de los formularios y el estado.
-- [ ] Recorrer los mismos trayectos con mouse y toque emulado. Comprobar que una casilla de pared se rechaza, que el destino tocado coincide con el que observa el segundo perfil y que salir de una puerta restaura la cámara exterior.
+- [x] Registrar en el clásico una ruta exterior y tres puertas de referencia del mapa. La entrada `(80, 211)` lleva a `(155, 311)` con cámara fija. La entrada `(71, 3)` lleva a `(155, 71)` con seguimiento acotado. La salida `(127, 120)` lleva a `(65, 125)` en exteriores.
+- [x] Portar la orientación y los límites de cámara de cada puerta. Convertir las coordenadas de propiedades Tiled de texto a número. Preservar la colisión `c`, el orden de suelo, personajes y techos, y la separación entre casillas y píxeles. Mantener el límite de 60 nodos y 28 casillas Manhattan que comprueba el servidor.
+- [x] Mostrar una indicación del destino y detener el movimiento local al aplicar un `reset`. Recalcular los límites del canvas al cambiar la posición de los formularios y el estado.
+- [x] Recorrer los mismos trayectos con mouse y toque emulado. Comprobar que una casilla de pared se rechaza, que el destino tocado coincide con el que observa el segundo perfil y que salir de una puerta restaura la cámara exterior.
 
 ## Tarea 4. Incorporar combate y reaparición
 
@@ -98,10 +98,10 @@ El paquete `init` contiene `stamp: 123456789`, `nbconnected: 1`, `nbAOIhorizonta
 
 El alta de un monstruo incluye `id`, posición y tipo `monster`. Las actualizaciones son parciales y su ruta contiene `path: Tile[]` y `delta`. Añadir `targetID` e `inFight` al estado de jugadores. Cada entrada de `hp` tiene `hp`, `target` y, cuando existe, `from`.
 
-- [ ] Reproducir en el clásico un ataque a un monstruo ya adyacente, un ataque que requiere acercarse y una muerte del jugador. Registrar el evento disparado y el punto de reaparición.
-- [ ] Renderizar altas, rutas, bajas y estados de monstruos desde los paquetes existentes. Usar el atlas y las animaciones del monstruo correspondiente. Validar que el objetivo sigue presente tanto al aceptar la ruta en `handlePath` como al ejecutarla en `checkAction`.
-- [ ] Reflejar daño y vida del servidor, mostrar el control de reaparición durante la muerte y enviar `revive` una vez por clic. Aplicar la posición de reaparición y restablecer la vida de la barra con el estado revivido.
-- [ ] Probar ataque adyacente, acercamiento, objetivo que desaparece, muerte y regreso al punto guardado. Confirmar que otro perfil ve el resultado y que el cliente vuelve a aceptar movimiento.
+- [x] Reproducir en el clásico un ataque a un monstruo ya adyacente, un ataque que requiere acercarse y una muerte del jugador. Registrar el evento disparado y el punto de reaparición.
+- [x] Renderizar altas, rutas, bajas y estados de monstruos desde los paquetes existentes. Usar el atlas y las animaciones del monstruo correspondiente. Validar que el objetivo sigue presente tanto al aceptar la ruta en `handlePath` como al ejecutarla en `checkAction`.
+- [x] Reflejar daño y vida del servidor, mostrar el control de reaparición durante la muerte y enviar `revive` una vez por clic. Aplicar la posición de reaparición y restablecer la vida de la barra con el estado revivido.
+- [x] Probar ataque adyacente, acercamiento, objetivo que desaparece, muerte y regreso al punto guardado. Confirmar que otro perfil ve el resultado y que el cliente vuelve a aceptar movimiento.
 
 ## Tarea 5. Incorporar botín, cofres y equipo
 
@@ -109,10 +109,10 @@ El alta de un monstruo incluye `id`, posición y tipo `monster`. Las actualizaci
 
 **Interfaz** Añadir `newitems` e `items` a `WorldUpdate` y `used` y `noPick` a `PersonalUpdate`. Resolver los IDs de equipo a las claves del catálogo antes de guardarlas como `armor` o `weapon`.
 
-- [ ] Ejercitar la apertura de un cofre adyacente, el consumo de un objeto y el intento de recoger equipo inferior en el clásico. Guardar los cambios que devuelve el servidor.
-- [ ] Mostrar altas y cambios de visibilidad de objetos. Enviar `action: 4` para abrir un cofre y `action: 0` para llegar al botín. Aplicar los cambios de arma y armadura del servidor al avatar, al HUD y al guardado local.
-- [ ] Mostrar los resultados de `used` y `noPick`. Comprobar con dos perfiles que la recogida retira el objeto y que un cofre se abre una sola vez.
-- [ ] Desde exteriores, equipar una mejora, recargar y verificar que MongoDB y los dos clientes muestran el equipo guardado.
+- [x] Ejercitar la apertura de un cofre adyacente, el consumo de un objeto y el intento de recoger equipo inferior en el clásico. Guardar los cambios que devuelve el servidor.
+- [x] Mostrar altas y cambios de visibilidad de objetos. Enviar `action: 4` para abrir un cofre y `action: 0` para llegar al botín. Aplicar los cambios de arma y armadura del servidor al avatar, al HUD y al guardado local.
+- [x] Mostrar los resultados de `used` y `noPick`. Comprobar con dos perfiles que la recogida retira el objeto y que un cofre se abre una sola vez.
+- [x] Desde exteriores, equipar una mejora, recargar y verificar que MongoDB y los dos clientes muestran el equipo guardado.
 
 ## Tarea 6. Recuperar NPC y diálogo
 
@@ -120,9 +120,9 @@ El alta de un monstruo incluye `id`, posición y tipo `monster`. Las actualizaci
 
 **Interfaz** Identificar cada NPC por su posición en el mapa para guardar el turno de diálogo durante la partida. Informar al controlador del primer diálogo para desbloquear su logro.
 
-- [ ] Elegir un NPC de varias líneas. Registrar la aproximación, la orientación, la última línea y el ciclo al volver a hablar.
-- [ ] Cargar las entidades y los atlas actuales. Marcar la casilla del NPC como bloqueada. Al seleccionarlo, caminar hasta su casilla adyacente y mostrar el diálogo mediante el ciclo local, también cuando el jugador ya está frente a él.
-- [ ] Probar el ciclo completo de diálogo, incluida la interacción que oculta el globo antes de volver a la primera línea. Probar también un NPC inaccesible y el clic adyacente. Verificar que el servidor recibe solo la acción de movimiento para aproximarse.
+- [x] Elegir un NPC de varias líneas. Registrar la aproximación, la orientación, la última línea y el ciclo al volver a hablar.
+- [x] Cargar las entidades y los atlas actuales. Marcar la casilla del NPC como bloqueada. Al seleccionarlo, caminar hasta su casilla adyacente y mostrar el diálogo mediante el ciclo local, también cuando el jugador ya está frente a él.
+- [x] Probar el ciclo completo de diálogo, incluida la interacción que oculta el globo antes de volver a la primera línea. Probar también un NPC inaccesible y el clic adyacente. Verificar que el servidor recibe solo la acción de movimiento para aproximarse.
 
 ## Tarea 7. Completar controles de sesión y presentación
 
@@ -130,12 +130,12 @@ El alta de un monstruo incluye `id`, posición y tipo `monster`. Las actualizaci
 
 **Interfaz** Conservar `ach<id>` y `killed_<id>` en `localStorage`. Alimentar la vista de logros desde los eventos de diálogo, botín, muerte del enemigo y ubicación. Ampliar `delete({ id }, ack?)` para que el servidor pueda devolver `{ ok: boolean }` después de la operación en MongoDB. El cliente clásico puede omitir el acuse.
 
-- [ ] Probar ayuda, logros, audio y el flujo confirmar o cancelar reinicio en el clásico. Sembrar en el perfil de prueba un logro alcanzado y un contador de muertes de `9`.
-- [ ] Portar ayuda, listado de los ocho logros, desbloqueos y notificaciones sin perder el progreso local. Comprobar que el siguiente derribo incrementa el contador de `9` a `10`.
-- [ ] Habilitar audio tras una interacción, usando los marcadores del catálogo y los archivos MP3/OGG. Probar el control de sonido, incluido el silencio durante combate y notificaciones.
-- [ ] Portar el reinicio desde la pantalla de personaje con confirmación explícita. Ante fallo o timeout conservar el guardado. Ante éxito retirar las claves de personaje y logros del juego, conservando el resto de las claves del origen.
-- [ ] Probar cancelación, fallo, borrado y pérdida del acuse después de un borrado exitoso con un personaje desechable. Confirmar que un reintento sobre un documento ya borrado permite limpiar el guardado local.
-- [ ] Probar que Enter y el botón envían un solo mensaje, que se puede operar la interfaz con teclado y que el chat y el HUD caben en portrait y landscape.
+- [x] Probar ayuda, logros, audio y el flujo confirmar o cancelar reinicio en el clásico. Sembrar en el perfil de prueba un logro alcanzado y un contador de muertes de `9`.
+- [x] Portar ayuda, listado de los ocho logros, desbloqueos y notificaciones sin perder el progreso local. Comprobar que el siguiente derribo incrementa el contador de `9` a `10`.
+- [x] Habilitar audio tras una interacción, usando los marcadores del catálogo y los archivos MP3/OGG. Probar el control de sonido, incluido el silencio durante combate y notificaciones.
+- [x] Portar el reinicio desde la pantalla de personaje con confirmación explícita. Ante fallo o timeout conservar el guardado. Ante éxito retirar las claves de personaje y logros del juego, conservando el resto de las claves del origen.
+- [x] Probar cancelación, fallo, borrado y pérdida del acuse después de un borrado exitoso con un personaje desechable. Confirmar que un reintento sobre un documento ya borrado permite limpiar el guardado local.
+- [x] Probar que Enter y el botón envían un solo mensaje, que se puede operar la interfaz con teclado y que el chat y el HUD caben en portrait y landscape.
 
 ## Tarea 8. Promover Phaser 4 y retirar Phaser 2
 
@@ -143,9 +143,18 @@ El alta de un monstruo incluye `id`, posición y tipo `monster`. Las actualizaci
 
 **Interfaz** `/` carga el cliente Phaser 4. `/phaser4.html` lleva a `/` para conservar marcadores. El origen, el servidor de juego, el formato de guardado y las rutas de recursos de juego permanecen compatibles con el despliegue anterior.
 
-- [ ] Ejecutar la prueba de paridad completa antes del corte. Abrir un guardado existente en clásico, Phaser 4 y clásico, en ese orden. Comparar el ObjectId, la casilla guardada, el equipo y los logros. Probar chat y movimiento entre clientes concurrentes en perfiles distintos.
-- [ ] Guardar el artefacto desplegable completo que aún contiene Phaser 2, incluidos código del servidor, dependencias, recursos y `dist/`. Registrar qué revisión y artefacto se restauran si falla el corte.
-- [ ] Promover Phaser 4 a `index.html`, retirar el enlace al cliente clásico y hacer que `/phaser4.html` redirija a `/`. Verificar apertura directa y recarga de ambas URLs usando la compilación de producción. Registrar este corte en su propio commit.
-- [ ] Retirar los módulos clásicos `src/{Being,Client,Factory,Game,Home,Human,Item,Monster,NPC,Player,entry-game,phaser-game}.js`, `js/phaser-input.js` y las dos rutas antiguas de `/vendor/`. Reemplazar el alias `phaser4` por la dependencia `phaser@4.2.1`, usar sus tipos publicados y retirar la declaración del alias. Conservar los módulos compartidos y el Decoder.
-- [ ] Actualizar documentación y lockfile. Instalar desde el lockfile en una copia limpia y repetir tipos, test, build y las pruebas de producción en Chromium y otro navegador. Confirmar movimiento táctil emulado en `/`, apertura del mismo guardado y ausencia de peticiones de Phaser 2. Registrar la limpieza en un segundo commit.
+- [x] Ejecutar la prueba de paridad completa antes del corte. Abrir un guardado existente en clásico, Phaser 4 y clásico, en ese orden. Comparar el ObjectId, la casilla guardada, el equipo y los logros. Probar chat y movimiento entre clientes concurrentes en perfiles distintos.
+- [x] Guardar el artefacto desplegable completo que aún contiene Phaser 2, incluidos código del servidor, dependencias, recursos y `dist/`. Registrar qué revisión y artefacto se restauran si falla el corte.
+- [x] Promover Phaser 4 a `index.html`, retirar el enlace al cliente clásico y hacer que `/phaser4.html` redirija a `/`. Verificar apertura directa y recarga de ambas URLs usando la compilación de producción. Registrar este corte en su propio commit.
+- [x] Retirar los módulos clásicos `src/{Being,Client,Factory,Game,Home,Human,Item,Monster,NPC,Player,entry-game,phaser-game}.js`, `js/phaser-input.js` y las dos rutas antiguas de `/vendor/`. Reemplazar el alias `phaser4` por la dependencia `phaser@4.2.1`, usar sus tipos publicados y retirar la declaración del alias. Conservar los módulos compartidos y el Decoder.
+- [x] Actualizar documentación y lockfile. Instalar desde el lockfile en una copia limpia y repetir tipos, test, build y las pruebas de producción en Chromium y otro navegador. Confirmar movimiento táctil emulado en `/`, apertura del mismo guardado y ausencia de peticiones de Phaser 2. Registrar la limpieza en un segundo commit.
 - [ ] Si el corte falla, restaurar el artefacto completo anterior y comprobar que el mismo ObjectId abre con su equipo y progreso en `/`.
+
+
+## Resultado del corte local
+
+La revisión de retorno es `9009b8859d95`. El respaldo local `.superpowers/rollback/phaserquest-pre-phaser4-9009b8859d95.tar.gz` contiene los dos clientes compilados, los recursos, el servidor y sus dependencias. SHA-256 `8e1db029cb11d75e4fed85951cebe14cb89255f0b9ecf5b8ba6f3b3b441e3868`.
+
+El cambio de ruta quedó en `3423147`. La compilación de una instalación limpia abrió el mismo personaje en Chromium y WebKit, incluido su equipo y progreso. Chromium también verificó alta, movimiento, chat entre perfiles y toque emulado. Express devuelve HTTP 302 desde `/phaser4.html`, y la compilación final no solicita recursos de Phaser 2.
+
+El respaldo arrancó y sirvió ambos clientes en un puerto de prueba. La restauración sobre la rama no fue necesaria porque el corte local pasó las pruebas.

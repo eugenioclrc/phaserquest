@@ -1,11 +1,11 @@
-import * as Phaser from 'phaser4';
+import * as Phaser from 'phaser';
 import { createConnection, savedCharacter } from './connection.ts';
 import { WorldScene } from './WorldScene.ts';
 import { Achievements } from './Achievements.ts';
 
 function element<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
-  if (!node) throw new Error(`Missing preview element #${id}`);
+  if (!node) throw new Error(`Missing game element #${id}`);
   return node as T;
 }
 

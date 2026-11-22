@@ -1,8 +1,8 @@
 # phaserquest
 
 Phaser Quest is a reproduction of Mozilla's [Browserquest](http://browserquest.mozilla.org/) using the following tools:
-- The [Phaser](https://phaser.io/) framework for the client 
-- [Socket.io](http://socket.io/) and [Node.js](https://nodejs.org/en/) for the server and client-server communication
+- [Phaser 4](https://phaser.io/) for the client
+- [Socket.IO](https://socket.io/) and [Bun](https://bun.sh/) for the server and client-server communication
 
 ## Run locally
 
@@ -15,7 +15,7 @@ bun run dev
 
 Open [http://127.0.0.1:8081](http://127.0.0.1:8081). Vite reloads the browser when client code changes, and Bun restarts the game server when server code changes. Both use the same port.
 
-Open [the Phaser 4 preview](http://127.0.0.1:8081/phaser4.html) to create or load a character, explore the map, and chat with nearby players. It uses the same server and saves as the classic client. Run `bun run typecheck` to check the TypeScript modules and `bun test` to verify the binary protocol.
+Create or load a character to explore the map and chat with nearby players. Existing character saves still work, and bookmarks to `/phaser4.html` redirect to `/`. Run `bun run typecheck` to check the TypeScript modules and `bun test` to verify the binary protocol.
 
 MongoDB defaults to `mongodb://127.0.0.1:27017` and the `phaserQuest` database. Set `MONGODB_URI` or `MONGODB_DB` to change those settings. Set `PORT` to change the HTTP port and `HOST` to change the bind address. Development binds to `127.0.0.1` by default. The existing `-p` and `--mongoPort` options also work, for example `bun run dev -p 8082 --mongoPort 27018`.
 
@@ -30,9 +30,8 @@ The build writes the browser bundle to `dist/`. The game server serves the bundl
 
 ## Code layout
 
-- `src/entry-game.js` registers the Phaser home and gameplay states.
-- `src/Game.js` handles gameplay rendering and input. `src/Client.js` exchanges updates with the server.
-- `src/phaser4/` contains the Phaser 4 preview scene, browser controls, and Socket.IO adapter.
+- `index.html` loads the Phaser 4 client from `src/phaser4/`. `WorldScene.ts` handles gameplay rendering and input, `main.ts` connects the browser controls, and `connection.ts` exchanges updates with the server.
+- `src/Decoder.ts` decodes server updates using the schemas in `shared/CoDec.ts`.
 - `server.js` starts HTTP, Socket.IO, and MongoDB. `js/server/GameServer.js` runs the world simulation and persists characters.
 
 ## Further documentation

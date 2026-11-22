@@ -1,4 +1,4 @@
-import * as Phaser from 'phaser4';
+import * as Phaser from 'phaser';
 import EasyStar from 'easystarjs';
 import { AOIutils } from '../../shared/AOIutils.ts';
 import type { ItemSnapshot, PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
