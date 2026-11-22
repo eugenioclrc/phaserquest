@@ -10,6 +10,7 @@ export interface PlayerSnapshot extends Tile {
   alive?: boolean;
   inFight?: boolean;
   targetID?: number;
+  routeVersion?: number;
   route?: { end: Tile; orientation?: number; delta?: number };
 }
 

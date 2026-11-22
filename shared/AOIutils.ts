@@ -7,21 +7,17 @@ const AOIutils = {
     return Math.floor(x / AOIutils.tileWidth) + AOIutils.nbAOIhorizontal * Math.floor(y / AOIutils.tileHeight);
   },
   listAdjacentAOIs(current: number): number[] {
-    const AOIs = [];
-    const isAtTop = (current < AOIutils.nbAOIhorizontal);
-    const isAtBottom = (current >= AOIutils.lastAOIid - AOIutils.nbAOIhorizontal);
-    const isAtLeft = (current % AOIutils.nbAOIhorizontal === 0);
-    const isAtRight = (current % AOIutils.nbAOIhorizontal === AOIutils.nbAOIhorizontal - 1);
-    AOIs.push(current);
-    if (!isAtTop) AOIs.push(current - AOIutils.nbAOIhorizontal);
-    if (!isAtBottom) AOIs.push(current + AOIutils.nbAOIhorizontal);
-    if (!isAtLeft) AOIs.push(current - 1);
-    if (!isAtRight) AOIs.push(current + 1);
-    if (!isAtTop && !isAtLeft) AOIs.push(current - 1 - AOIutils.nbAOIhorizontal);
-    if (!isAtTop && !isAtRight) AOIs.push((current + 1) - AOIutils.nbAOIhorizontal);
-    if (!isAtBottom && !isAtLeft) AOIs.push((current - 1) + AOIutils.nbAOIhorizontal);
-    if (!isAtBottom && !isAtRight) AOIs.push(current + 1 + AOIutils.nbAOIhorizontal);
-    return AOIs;
+    const columns = AOIutils.nbAOIhorizontal;
+    const col = current % columns;
+    const row = Math.floor(current / columns);
+    const nearby = [];
+    for (let y = Math.max(0, row - 1); y <= row + 1; y++) {
+      for (let x = Math.max(0, col - 1); x <= Math.min(columns - 1, col + 1); x++) {
+        const id = y * columns + x;
+        if (id < AOIutils.lastAOIid) nearby.push(id);
+      }
+    }
+    return nearby;
   },
 };
 

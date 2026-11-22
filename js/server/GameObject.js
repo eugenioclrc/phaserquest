@@ -11,7 +11,9 @@ class GameObject {
   setProperty(property, value) {
     // Updates a property of the object and update the AOI's around it
     // console.log(this.id+' sets '+property+' to '+value);
+    if (this[property] === value) return;
     this[property] = value;
+    if (this.inWorld) GameServer.changedEntities.add(this);
     if (this.id !== undefined) this.updateAOIs(property, value);
   }
 

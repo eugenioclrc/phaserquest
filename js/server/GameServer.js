@@ -11,6 +11,8 @@ const assetsDir = path.join(__dirname, '..', '..', 'assets');
 
 const GameServer = {
   map: null, // object containing all the data about the world map
+  changedEntities: new Set(),
+  changedAreas: new Set(),
   mapReady: false, // is the server done processing the map or not
   // frequency of the server update loop ; rate at which the player and monsters objects will call their "update" methods
   updateRate: 1000 / 12,
@@ -86,6 +88,11 @@ GameServer.readMap = async function () {
   GameServer.makeIDmap(GameServer.db.items, GameServer.db.itemsIDmap);
 
   const data = await fs.promises.readFile(path.join(assetsDir, 'maps/minimap_server.json'), 'utf8');
+  GameServer.lastItemID = 0;
+  GameServer.lastMonsterID = 0;
+  GameServer.lastPlayerID = 0;
+  GameServer.changedEntities.clear();
+  GameServer.changedAreas.clear();
   GameServer.map = JSON.parse(data);
   GameServer.objects = {};
   GameServer.layers = [];
@@ -159,7 +166,7 @@ GameServer.setUpDoors = function () { // Set up teleports
     const door = GameServer.objects.doors[d];
     const position = GameServer.computeTileCoords(door.x, door.y);
     GameServer.doors.add(position.x, position.y, {
-      to: { x: door.properties.x, y: door.properties.y },
+      to: { x: Number(door.properties.x), y: Number(door.properties.y) },
       camera: (door.properties.hasOwnProperty('cx') ?
             { x: door.properties.cx, y: door.properties.cy }
                 : null),
@@ -331,16 +338,23 @@ GameServer.addAtLocation = function (entity) {
     // Add some entity to all the data structures related to position (i.e. the spaceMap of the category of the entity, and the AOI)
   const map = GameServer.getSpaceMap(entity);
   map.add(entity.x, entity.y, entity);
-  GameServer.AOIfromTiles.getFirst(entity.x, entity.y).addEntity(entity, null);
+  const area = GameServer.AOIfromTiles.getFirst(entity.x, entity.y);
+  area.addEntity(entity, null);
+  entity.inWorld = true;
+  GameServer.changedEntities.add(entity);
+  GameServer.changedAreas.add(area.id);
 };
 
 GameServer.moveAtLocation = function (entity, fromX, fromY, toX, toY) {
     // Update the position of an entity in all data structures related to position (spaceMap and AOI)
   const map = GameServer.getSpaceMap(entity);
   map.move(fromX, fromY, toX, toY, entity);
+  GameServer.changedEntities.add(entity);
   const AOIfrom = GameServer.AOIfromTiles.getFirst(fromX, fromY);
   const AOIto = GameServer.AOIfromTiles.getFirst(entity.x, entity.y);
   if (AOIfrom.id != AOIto.id) {
+    GameServer.changedAreas.add(AOIfrom.id);
+    GameServer.changedAreas.add(AOIto.id);
     entity.setProperty('aoi', AOIto.id);
     const previousAOI = AOIfrom.id;
     if (entity.category === 'player') {
@@ -361,7 +375,11 @@ GameServer.removeFromLocation = function (entity) {
     // Remove an entity from all data structures related to position (spaceMap and AOI)
   const map = GameServer.getSpaceMap(entity);
   map.delete(entity.x, entity.y, entity);
-  GameServer.AOIfromTiles.getFirst(entity.x, entity.y).deleteEntity(entity);
+  const area = GameServer.AOIfromTiles.getFirst(entity.x, entity.y);
+  area.deleteEntity(entity);
+  entity.inWorld = false;
+  GameServer.changedEntities.add(entity);
+  GameServer.changedAreas.add(area.id);
 };
 
 GameServer.determineStartingPosition = function () {
@@ -650,7 +668,7 @@ GameServer.clearAOIs = function () {
 GameServer.handleAOItransition = function (entity, previous) {
     // When a player moves from one AOI to another, identify which AOIs should be notified and update them
   let AOIs = entity.listAdjacentAOIs(true);
-  if (previous) {
+  if (previous !== null) {
     const previousAOIs = AOIutils.listAdjacentAOIs(previous);
         // Array_A.diff(Array_B) returns the elements in A that are not in B
         // This is used because only the AOIs that are now adjacent, but were not before, need an update. Those who where already adjacent are up-to-date

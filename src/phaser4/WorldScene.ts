@@ -48,6 +48,7 @@ type Avatar = Speaker & {
   inFight?: boolean;
   targetID?: number;
   aoi?: number;
+  routeVersion?: number;
   motion?: Phaser.Tweens.Tween;
 };
 
@@ -245,9 +246,6 @@ export class WorldScene extends Phaser.Scene {
     const hero = this.heroId === undefined ? undefined : this.avatars.get(this.heroId);
     if (hero?.aoi === undefined) return;
     const nearby = AOIutils.listAdjacentAOIs(hero.aoi);
-    for (const [id, avatar] of this.avatars) {
-      if (avatar.aoi !== undefined && !nearby.includes(avatar.aoi)) this.removeAvatar(id);
-    }
     for (const view of this.items.values()) {
       if (!nearby.includes(AOIutils.idFromCoords(view.data.x, view.data.y))) this.removeItem(view);
     }
@@ -488,6 +486,10 @@ export class WorldScene extends Phaser.Scene {
       direction: 4, alive: player.alive ?? true,
     };
     this.avatars.set(player.id, avatar);
+    if (player.id === this.heroId) {
+      this.position(avatar, player);
+      this.onHeroAlive(avatar.alive);
+    }
     this.updateAvatar(avatar, player, player.id === this.heroId);
     return avatar;
   }
@@ -506,20 +508,20 @@ export class WorldScene extends Phaser.Scene {
       if (weapon.offsets) avatar.weapon.setPosition(weapon.offsets.x, weapon.offsets.y);
       if (isHero) this.onHeroEquipment('weapon', weapon.key);
     }
-    if (changes.targetID !== undefined) avatar.targetID = changes.targetID;
+    if (changes.targetID !== undefined) avatar.targetID = changes.targetID < 0 ? undefined : changes.targetID;
     if (changes.inFight !== undefined) avatar.inFight = changes.inFight;
     if (changes.alive !== undefined) {
       if (avatar.alive && !changes.alive && (isHero || this.cameras.main.worldView.contains(avatar.container.x, avatar.container.y))) {
         this.playSound('death');
       }
+      if (isHero && avatar.alive !== changes.alive) this.onHeroAlive(changes.alive);
       avatar.alive = changes.alive;
-      if (isHero) this.onHeroAlive(changes.alive);
     }
     avatar.container.setVisible(avatar.alive);
-    if (changes.x !== undefined && changes.y !== undefined) {
-      const tile = { x: changes.x, y: changes.y };
-      if (isHero) this.reset(tile);
-      else this.place(avatar, tile);
+    const changedRoute = changes.routeVersion === undefined || changes.routeVersion !== avatar.routeVersion;
+    if (changes.routeVersion !== undefined) avatar.routeVersion = changes.routeVersion;
+    if (!isHero && (changedRoute || !changes.route) && changes.x !== undefined && changes.y !== undefined) {
+      this.place(avatar, { x: changes.x, y: changes.y });
     }
     if (!avatar.alive) {
       avatar.motion?.stop();
@@ -527,7 +529,7 @@ export class WorldScene extends Phaser.Scene {
       if (isHero) this.destination?.setVisible(false);
     }
     if (!avatar.motion) this.showFrame(avatar, idleFrame[avatar.direction]);
-    if (avatar.alive && changes.route && !isHero) {
+    if (avatar.alive && changes.route && !isHero && changedRoute) {
       const path = this.findPath(this.tileAt(avatar), changes.route.end);
       if (path && path.length > 1) this.move(avatar, path, changes.route.orientation, changes.route.delta);
     }

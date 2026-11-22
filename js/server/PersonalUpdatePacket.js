@@ -17,6 +17,7 @@ class PersonalUpdatePacket {
     if (this.life !== undefined) return false;
     if (this.x !== undefined) return false;
     if (this.y !== undefined) return false;
+    if (this.teleport !== undefined) return false;
     // boolean ; need to send a message about an item not being picked or not
     if (this.noPick !== undefined) return false;
     if (this.hp.length > 0) return false;

@@ -156,6 +156,7 @@ class Player extends MovingEntity {
   teleport(door) {
     this.x = door.to.x;
     this.y = door.to.y;
+    this.updatePacket.teleport = { x: this.x, y: this.y };
     this.manageFoes();
     this.endFight();
   }

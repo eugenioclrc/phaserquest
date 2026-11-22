@@ -14,6 +14,7 @@ class MovingEntity extends GameObject {
     this.inFight = false;
     this.targetID = null;
     this.alive = true;
+    this.routeVersion = 0;
     this.foes = [];
     this.lastFightUpdate = Date.now();
     this.lastDamage = Date.now();
@@ -23,6 +24,8 @@ class MovingEntity extends GameObject {
 
   setRoute(path, departureTime, latency, action, orientation) {
     this.route = new Route(this, path, departureTime, latency, action, orientation);
+    this.routeVersion++;
+    if (this.inWorld) GameServer.changedEntities.add(this);
     this.updateAOIRoutes();
   }
 
@@ -38,7 +41,7 @@ class MovingEntity extends GameObject {
 
   setTarget(target) {
     this.target = target;
-    if (target) this.setProperty('targetID', target.id); // only broadcast if non-null
+    this.setProperty('targetID', target?.id ?? -1);
   }
 
   update() {
@@ -67,12 +70,19 @@ class MovingEntity extends GameObject {
         GameServer.checkSave(this);
         console.log(`${this.name} moved to ${this.x}, ${this.y}`);
       }
-      this.route = undefined;
+      this.clearRoute();
     }
     if (this.x != previousX || this.y != previousY) {
       GameServer.moveAtLocation(this, previousX, previousY, this.x, this.y);
       if (this.constructor.name == 'Player') GameServer.checkMonster(this);
     }
+  }
+
+  clearRoute() {
+    if (!this.route) return;
+    this.route = undefined;
+    this.routeVersion++;
+    if (this.inWorld) GameServer.changedEntities.add(this);
   }
 
   setAtDelta(delta) {
@@ -122,7 +132,7 @@ class MovingEntity extends GameObject {
   }
 
   die() {
-    this.route = undefined;
+    this.clearRoute();
     this.manageFoes();
     if (this.lastHitter) this.setProperty('lastHitter', this.lastHitter.id);
     this.endFight();

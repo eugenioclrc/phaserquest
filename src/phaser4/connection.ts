@@ -1,21 +1,17 @@
-import { Client, type Room } from '@colyseus/sdk';
+import { Callbacks, Client, type Room } from '@colyseus/sdk';
 import { CharacterJoinError } from '../../shared/WorldProtocol.ts';
 import type { PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
 
-type Initialization = {
-  stamp: number;
-  player: PlayerSnapshot;
-  nbconnected: number;
-  nbAOIhorizontal: number;
-  lastAOIid: number;
-};
+import type { WorldRoom } from '../../js/server/WorldRoom.ts';
+import type { PlayerState } from '../../js/server/WorldState.ts';
 
-type Update = {
-  stamp: number;
-  global?: WorldUpdate;
-  local?: PersonalUpdate;
-  nbconnected?: number;
-};
+function playerSnapshot(row: PlayerState): PlayerSnapshot {
+  const { id, name, x, y, aoi, armor, weapon, alive, inFight, targetID, routeVersion, route } = row;
+  return {
+    id, name, x, y, aoi, armor, weapon, alive, inFight, targetID, routeVersion,
+    route: route && { end: { x: route.end.x, y: route.end.y }, orientation: route.orientation, delta: route.delta },
+  };
+}
 
 type ConnectionEvents = {
   enter(player: PlayerSnapshot, nbAOIhorizontal: number, lastAOIid: number): void;
@@ -77,43 +73,78 @@ function characterMessage(code?: number): string {
 
 export function createConnection(events: ConnectionEvents) {
   const sdk = new Client(window.location.origin);
-  let room: Room | undefined;
+  let room: Room<WorldRoom> | undefined;
   let characterId: string | undefined;
   let entered = false;
   let deleting = false;
   let creating = false;
 
-  function sendAction(type: string, payload?: unknown): boolean {
+  function sendAction(send: (active: Room<WorldRoom>) => void): boolean {
     if (!entered || !room?.connection.isOpen) return false;
-    room.send(type, payload);
+    send(room);
     return true;
   }
 
   async function join(id: string, resume = true) {
     const key = 'worldReconnection:' + id;
     try {
-      let next: Room | undefined;
+      let next: Room<WorldRoom> | undefined;
       if (resume) {
         const token = sessionStorage.getItem(key);
         if (token) {
           try {
-            next = await sdk.reconnect(token);
+            next = await sdk.reconnect<WorldRoom>(token);
           } catch {
             sessionStorage.removeItem(key);
           }
         }
       }
-      next ??= await sdk.join('world', { id });
+      next ??= await sdk.join<WorldRoom>('world', { id });
       room = next;
       next.reconnection.minUptime = 0;
       next.reconnection.maxEnqueuedMessages = 0;
       let dropped = false;
 
+      let worldUpdate: WorldUpdate = {};
+      const callbacks = Callbacks.get(next);
+      const unbindPlayer = new Map<string, () => void>();
+      callbacks.onAdd('players', (player, key) => {
+        (worldUpdate.newplayers ??= []).push(playerSnapshot(player));
+        unbindPlayer.set(key, callbacks.onChange(player, () => {
+          (worldUpdate.players ??= {})[player.id] = playerSnapshot(player);
+        }));
+      });
+      callbacks.onRemove('players', (player, key) => {
+        unbindPlayer.get(key)?.();
+        unbindPlayer.delete(key);
+        (worldUpdate.disconnected ??= []).push(player.id);
+      });
+
+      function flush() {
+        if (room !== next || dropped || !next?.state) return;
+        const state = next.state;
+        const self = state.self?.get(next.sessionId);
+        if (!self) return;
+        if (!entered) {
+          const player = state.players?.get(String(self.playerId));
+          if (!player) return;
+          events.enter(playerSnapshot(player), state.aoiColumns, state.aoiCount);
+          worldUpdate = { newplayers: Array.from(state.players.values(), playerSnapshot) };
+          entered = true;
+        }
+        events.updateWorld(worldUpdate);
+        worldUpdate = {};
+        events.updateSelf({ life: self.life });
+        events.online(state.online);
+      }
+
       function ready() {
         sessionStorage.setItem(key, next!.reconnectionToken);
         next!.send('ready');
+        flush();
       }
 
+      next.onStateChange(flush);
       next.onDrop(() => {
         dropped = true;
         entered = false;
@@ -144,19 +175,10 @@ export function createConnection(events: ConnectionEvents) {
         events.error(characterMessage(code));
         void next!.leave();
       });
-      next.onMessage('init', (data: Initialization) => {
-        entered = true;
-        next!.send('ponq', data.stamp);
-        events.enter(data.player, data.nbAOIhorizontal, data.lastAOIid);
-        events.online(data.nbconnected);
-      });
-      next.onMessage('update', (data: Update) => {
-        if (!entered) return;
-        next!.send('ponq', data.stamp);
-        if (data.nbconnected !== undefined) events.online(data.nbconnected);
-        if (data.global) events.updateWorld(data.global);
-        if (data.local) events.updateSelf(data.local);
-      });
+      next.onMessage('ping', (stamp: number) => next!.send('ponq', stamp));
+      next.onMessage('update', (update: WorldUpdate) => { if (entered) events.updateWorld(update); });
+      next.onMessage('revived', (tile: Tile) => { if (entered) events.updateSelf(tile); });
+      next.onMessage('playerEvents', (update: PersonalUpdate) => { if (entered) events.updateSelf(update); });
       next.onMessage('reset', (tile: Tile | null) => { if (entered && tile) events.reset(tile); });
       next.onMessage('chat', ({ id: sender, txt }: { id: number; txt: string }) => { if (entered) events.say(sender, txt); });
       ready();
@@ -212,14 +234,14 @@ export function createConnection(events: ConnectionEvents) {
     },
     move(path: Tile[], orientation: number, action: PathAction = { action: 0 }): boolean {
       if (path.length < (action.action === 0 ? 2 : 1) || path.length > 60) return false;
-      return sendAction('path', { path, action, or: orientation });
+      return sendAction(active => active.send('path', { path, action, or: orientation }));
     },
     revive(): boolean {
-      return sendAction('revive');
+      return sendAction(active => active.send('revive'));
     },
     chat(text: string): boolean {
       if (!text.trim() || text.length > 300) return false;
-      return sendAction('chat', text);
+      return sendAction(active => active.send('chat', text));
     },
   };
 }
