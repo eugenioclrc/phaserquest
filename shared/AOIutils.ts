@@ -9,7 +9,7 @@ const AOIutils = {
   listAdjacentAOIs(current: number): number[] {
     const AOIs = [];
     const isAtTop = (current < AOIutils.nbAOIhorizontal);
-    const isAtBottom = (current > AOIutils.lastAOIid - AOIutils.nbAOIhorizontal);
+    const isAtBottom = (current >= AOIutils.lastAOIid - AOIutils.nbAOIhorizontal);
     const isAtLeft = (current % AOIutils.nbAOIhorizontal === 0);
     const isAtRight = (current % AOIutils.nbAOIhorizontal === AOIutils.nbAOIhorizontal - 1);
     AOIs.push(current);
