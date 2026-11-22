@@ -1,4 +1,4 @@
-import { Room, type Client } from 'colyseus';
+import { Room, type Client } from '@colyseus/core';
 import { StateView } from '@colyseus/schema';
 import { AOIutils } from '../../shared/AOIutils.ts';
 import { CharacterJoinError, type PathCommand, type PlayerEvents, type Tile } from '../../shared/WorldProtocol.ts';

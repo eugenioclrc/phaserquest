@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Client, type Room } from '@colyseus/sdk';
-import { defineRoom, matchMaker } from 'colyseus';
+import { defineRoom, matchMaker } from '@colyseus/core';
 import { ObjectId } from 'mongodb';
 import express from 'express';
 import type { Tile } from '../shared/WorldProtocol.ts';

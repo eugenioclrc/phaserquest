@@ -27,10 +27,11 @@
   "license": "MIT",
   "homepage": "https://github.com/Jerenaux/phaserquest#readme",
   "dependencies": {
+    "@colyseus/core": "0.18.29",
     "@colyseus/schema": "5.0.50",
     "@colyseus/sdk": "0.18.10",
     "@colyseus/ws-transport": "0.18.5",
-    "colyseus": "0.18.12",
+    "@pm2/io": "6.1.0",
     "easystarjs": "^0.4.1",
     "express": "^5.1.0",
     "mongodb": "^7.0.0",

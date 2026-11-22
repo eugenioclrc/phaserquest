@@ -1,3 +1,6 @@
+// PM2's V8 compatibility probes scan the Bun heap on each metrics refresh.
+require('@pm2/io').init({ metrics: { v8: false } });
+
 const { access } = require('node:fs/promises');
 const { createServer } = require('node:http');
 const { join } = require('node:path');
@@ -76,7 +79,7 @@ async function start() {
   }
 
   await gs.readMap();
-  const { defineRoom, matchMaker } = await import('colyseus');
+  const { defineRoom, matchMaker } = await import('@colyseus/core');
   const { createGameServer } = await import('./js/server/createGameServer.ts');
   const { WorldRoom } = await import('./js/server/WorldRoom.ts');
   const gameServer = createGameServer(server, { world: defineRoom(WorldRoom) });

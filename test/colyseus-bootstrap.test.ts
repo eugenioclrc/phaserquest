@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { createServer } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { Client } from '@colyseus/sdk';
-import { Room, defineRoom, matchMaker } from 'colyseus';
+import { Room, defineRoom, matchMaker } from '@colyseus/core';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { createGameServer } from '../js/server/createGameServer.ts';
@@ -19,7 +19,11 @@ test('Express and Colyseus share a listener with one persistent room', async () 
   const app = express();
   app.get('/health', (_req, res) => res.send('ok'));
   const http = createServer(app);
-  const vite = await createViteServer({ configFile: false, server: { middlewareMode: true, ws: { server: http } } });
+  const vite = await createViteServer({
+    configFile: false,
+    optimizeDeps: { noDiscovery: true },
+    server: { middlewareMode: true, ws: { server: http } },
+  });
   app.use(vite.middlewares);
   const server = createGameServer(http, { probe: defineRoom(ProbeRoom) });
   let hmr: WebSocket | undefined;

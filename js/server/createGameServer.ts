@@ -1,5 +1,5 @@
 import type { Server as HttpServer } from 'node:http';
-import { defineServer, matchMaker, type RegisteredHandler } from 'colyseus';
+import { defineServer, matchMaker, type RegisteredHandler } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 
 export function createGameServer<T extends Record<string, RegisteredHandler>>(http: HttpServer, rooms: T) {
