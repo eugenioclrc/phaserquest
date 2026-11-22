@@ -75,6 +75,22 @@ export function createConnection(events: ConnectionEvents) {
     }
   }
 
+  function sendAction(emit: () => void): boolean {
+    if (!entered || !socket.connected) return false;
+    const buffered = socket.sendBuffer.length;
+    let sent = false;
+    const markSent = () => { sent = true; };
+    socket.onAnyOutgoing(markSent);
+    try {
+      emit();
+      return sent;
+    } finally {
+      socket.offAnyOutgoing(markSent);
+      // Drop actions Socket.IO buffered for a future connection after heartbeat expiry.
+      if (!sent) socket.sendBuffer.splice(buffered);
+    }
+  }
+
   socket.on('connect', requestEntry);
   socket.on('disconnect', () => {
     entered = false;
@@ -156,14 +172,12 @@ export function createConnection(events: ConnectionEvents) {
       else socket.connect();
     },
     move(path: Tile[], orientation: number): boolean {
-      if (!entered || !socket.connected || path.length < 2 || path.length > 60) return false;
-      socket.emit('path', { path, action: { action: 0 }, or: orientation });
-      return true;
+      if (path.length < 2 || path.length > 60) return false;
+      return sendAction(() => socket.emit('path', { path, action: { action: 0 }, or: orientation }));
     },
     chat(text: string): boolean {
-      if (!entered || !socket.connected || !text.trim() || text.length > 300) return false;
-      socket.emit('chat', text);
-      return true;
+      if (!text.trim() || text.length > 300) return false;
+      return sendAction(() => socket.emit('chat', text));
     },
   };
 }

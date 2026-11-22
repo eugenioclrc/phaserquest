@@ -259,10 +259,6 @@ GameServer.checkSocketID = function (id) { // check if no other player is using 
   return (GameServer.getPlayerID(id) === undefined);
 };
 
-GameServer.checkPlayerID = function (id) { // check if no other player is using same player ID
-  return (GameServer.players[id] === undefined);
-};
-
 GameServer.addNewPlayer = async function (socket, data) {
   if (!socket.connected || typeof data.name !== 'string' || !data.name.length) return;
   const player = new Player(data.name);
@@ -300,8 +296,13 @@ GameServer.loadPlayer = async function (socket, id) {
     GameServer.server.sendError(socket);
     return;
   }
+  const mongoID = document._id.toString();
+  if (Object.values(GameServer.players).some(player => player.getMongoID() === mongoID)) {
+    socket.emit('wait');
+    return;
+  }
   const player = new Player();
-  player.setIDs(document._id.toString(), socket.id);
+  player.setIDs(mongoID, socket.id);
   player.getDataFromDb(document);
   GameServer.finalizePlayer(socket, player);
 };

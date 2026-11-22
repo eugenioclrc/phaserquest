@@ -98,7 +98,7 @@ io.on('connection', (socket) => {
     try {
       if (data.new) {
         await gs.addNewPlayer(socket, data);
-      } else if (gs.checkPlayerID(data.id)) {
+      } else {
         await gs.loadPlayer(socket, data.id);
       }
     } finally {
