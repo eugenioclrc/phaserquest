@@ -1,111 +1,81 @@
-/*
- // sending to sender-client only
- socket.emit('message', "this is a test");
-
- // sending to all clients, include sender
- io.emit('message', "this is a test");
-
- // sending to all clients except sender
- socket.broadcast.emit('message', "this is a test");
-
- // sending to all clients in 'game' room(channel) except sender
- socket.broadcast.to('game').emit('message', 'nice game');
-
- // sending to all clients in 'game' room(channel), include sender
- io.in('game').emit('message', 'cool game');
-
- // sending to sender client, only if they are in 'game' room(channel)
- socket.to('game').emit('message', 'enjoy the game');
-
- // sending to all clients in namespace 'myNamespace', include sender
- io.of('myNamespace').emit('message', 'gg');
-
- // sending to individual socketid, but not sender
- socket.broadcast.to(socketid).emit('message', 'for your eyes only');
- */
-
+const { access } = require('node:fs/promises');
+const { createServer } = require('node:http');
+const { join } = require('node:path');
+const { parseArgs } = require('node:util');
 const express = require('express');
-const app = express();
-const server = require('http').Server(app);
-const io = require('socket.io').listen(server);
-const mongo = require('mongodb').MongoClient;
-const quickselect = require('quickselect'); // Used to compute the median for latency
+const { Server } = require('socket.io');
+const { MongoClient } = require('mongodb');
+const quickselect = require('quickselect');
 
-const mapFormat = require('./js/server/format.js');
 const gs = require('./js/server/GameServer.js').GameServer;
-// For the binary protocol of update packets :
 const CoDec = require('./js/CoDec.js').CoDec;
 const Encoder = require('./js/server/Encoder.js');
 
+const { values: options } = parseArgs({
+  options: {
+    dev: { type: 'boolean' },
+    port: { type: 'string', short: 'p' },
+    mongoPort: { type: 'string', default: '27017' },
+  },
+});
+
+const app = express();
+const server = createServer(app);
+const io = new Server(server, {
+  serveClient: false,
+  destroyUpgrade: !options.dev, // Let Vite handle its own WebSocket upgrades on the dev server.
+});
 server.enableBinary = true;
 gs.server = server;
 
-let indexHTML = false;
-const isProd = process.env.NODE_ENV === 'production';
-if (isProd) {
-  // in production: create server renderer and index HTML from real fs
-  // renderer = createRenderer(fs.readFileSync(resolve('./dist/server-bundle.js'), 'utf-8'))
-  // indexHTML = parseIndex(fs.readFileSync(resolve('./dist/index.html'), 'utf-8'))
-} else {
-  // in development: setup the dev server with watch and hot-reload,
-  // and update renderer / index HTML on file change.
-  require('./build/setup-dev-server.js')(app, {
-    bundleUpdated: bundle => {
-      // renderer = createRenderer(bundle)
-    },
-    indexUpdated: index => {
-      indexHTML = index;
-      // indexHTML = parseIndex(index)
-    }
-  })
-}
-
-
-app.use('/css', express.static(`${__dirname}/css`));
-app.use('/js', express.static(`${__dirname}/js`));
-app.use('/assets', express.static(`${__dirname}/assets`));
-
-
-app.get('/', (req, res) => {
-  res.send(indexHTML);
+app.use('/assets', express.static(join(__dirname, 'assets')));
+app.get('/vendor/phaser.js', (req, res) => {
+  res.sendFile(require.resolve('phaser/build/phaser.min.js'));
+});
+app.get('/vendor/phaser-input.js', (req, res) => {
+  res.sendFile(join(__dirname, 'js/phaser-input.js'));
 });
 
-/* app.get('/format',function(req,res){
-    res.status(200).send('Formatting...');
-    mapFormat.format();
-});*/
+async function start() {
+  const dist = join(__dirname, 'dist');
+  if (!options.dev) {
+    await access(join(dist, 'index.html')).catch(() => {
+      throw new Error('Run bun run build before bun run start.');
+    });
+    app.use(express.static(dist));
+  }
 
-// Manage command line arguments
-const myArgs = require('optimist').argv;
-let mongoHost,
-  mongoDBName;
+  const mongo = new MongoClient(process.env.MONGODB_URI || 'mongodb://127.0.0.1:' + options.mongoPort, {
+    serverSelectionTimeoutMS: 5000,
+  });
+  await mongo.connect();
+  server.db = mongo.db(process.env.MONGODB_DB || 'phaserQuest');
 
-if (myArgs.heroku) { // --heroku flag to behave according to Heroku's specs
-  mongoHost = `heroku_4tv68zls:${myArgs.pass}@ds141368.mlab.com:41368`;
-  mongoDBName = 'heroku_4tv68zls';
-} else {
-  const mongoPort = (myArgs.mongoPort || 27017);
-  mongoHost = `localhost:${mongoPort}`;
-  mongoDBName = 'phaserQuest';
-}
+  if (options.dev) {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      root: __dirname,
+      server: { middlewareMode: true, ws: { server } },
+    });
+    app.use(vite.middlewares);
+  }
 
-server.listen(myArgs.p || process.env.PORT || 8081, () => { // -p flag to specify port ; the env variable is needed for Heroku
-  console.log(`Listening on ${server.address().port}`);
-  server.clientUpdateRate = 1000 / 5; // Rate at which update packets are sent
+  server.clientUpdateRate = 1000 / 5;
   gs.readMap();
   server.setUpdateLoop();
-
-  mongo.connect(`mongodb://${mongoHost}/${mongoDBName}`, (err, db) => {
-    if (err) throw (err);
-    server.db = db;
-    console.log('Connection to db established');
+  const port = Number(options.port ?? process.env.PORT ?? 8081);
+  const host = process.env.HOST || (options.dev ? '127.0.0.1' : undefined);
+  server.listen(port, host, () => {
+    console.log('PhaserQuest listening at http://' + (host || 'localhost') + ':' + server.address().port);
   });
-});
+}
 
 io.on('connection', (socket) => {
   console.log(`connection widht ID ${socket.id}`);
   console.log(`${server.getNbConnected()} already connected`);
   socket.pings = [];
+  socket.latency = 0;
+  let initializing = false;
 
   socket.on('ponq', (sentStamp) => {
         // Compute a running estimate of the latency of a client each time an interaction takes place between client and server
@@ -118,17 +88,21 @@ io.on('connection', (socket) => {
     socket.latency = server.quickMedian(socket.pings.slice(0)); // quickMedian used the quickselect algorithm to compute the median of a list of values
   });
 
-  socket.on('init-world', (data) => {
+  socket.on('init-world', async (data) => {
+    if (!data || initializing || !gs.checkSocketID(socket.id)) return;
     if (!gs.mapReady) {
       socket.emit('wait');
       return;
     }
-    if (data.new) {
-      if (!gs.checkSocketID(socket.id)) return;
-      gs.addNewPlayer(socket, data);
-    } else {
-      if (!gs.checkPlayerID(data.id)) return;
-      gs.loadPlayer(socket, data.id);
+    initializing = true;
+    try {
+      if (data.new) {
+        await gs.addNewPlayer(socket, data);
+      } else if (gs.checkPlayerID(data.id)) {
+        await gs.loadPlayer(socket, data.id);
+      }
+    } finally {
+      initializing = false;
     }
   });
 
@@ -141,12 +115,15 @@ io.on('connection', (socket) => {
   });
 
   socket.on('chat', (txt) => {
-    if (!txt.length || txt.length > 300) return;
-    const rooms = gs.listAOIsFromSocket(socket.id);
-    const playerID = gs.getPlayerID(socket.id);
-    rooms.forEach((room) => {
-      socket.broadcast.to(room).emit('chat', { id: playerID, txt });
-    });
+    if (typeof txt !== 'string' || !txt.trim() || txt.length > 300) return;
+    const sender = gs.getPlayer(socket.id);
+    if (!sender) return;
+    const nearbyAreas = sender.listAdjacentAOIs(true);
+    for (const player of Object.values(gs.players)) {
+      if (player !== sender && nearbyAreas.includes(player.aoi)) {
+        io.to(player.socketID).emit('chat', { id: sender.id, txt });
+      }
+    }
   });
 
   socket.on('delete', (data) => {
@@ -171,12 +148,7 @@ server.sendInitializationPacket = function (socket, packet) {
 
 server.sendUpdate = function (socketID, pkg) {
   pkg = server.addStamp(pkg);
-  try {
-    pkg.latency = Math.floor(server.getSocket(socketID).latency);
-  } catch (e) {
-    console.log(e);
-    pkg.latency = 0;
-  }
+  pkg.latency = Math.floor(io.sockets.sockets.get(socketID)?.latency ?? 0);
   if (server.enableBinary) pkg = Encoder.encode(pkg, CoDec.finalUpdateSchema);
   if (pkg) io.in(socketID).emit('update', pkg);
 };
@@ -189,8 +161,8 @@ server.sendID = function (socket, playerID) {
   socket.emit('pid', playerID);
 };
 
-server.sendError = function (socket) {
-  socket.emit('dbError');
+server.sendError = function (socket, details) {
+  socket.emit('dbError', details);
 };
 
 server.addStamp = function (pkg) {
@@ -202,13 +174,14 @@ server.getShortStamp = function () {
   return parseInt(Date.now().toString().substr(-9));
 };
 
-server.getSocket = function (id) {
-  return io.sockets.connected[id]; // won't work if the socket is subscribed to a namespace, because the namsepace will be part of the id
-};
-
 server.quickMedian = function (arr) { // Compute the median of an array using the quickselect algorithm
   const l = arr.length;
   const n = (l % 2 == 0 ? (l / 2) - 1 : (l - 1) / 2);
   quickselect(arr, n);
   return arr[n];
 };
+
+start().catch((err) => {
+  console.error('PhaserQuest could not start.', err.message);
+  process.exit(1);
+});

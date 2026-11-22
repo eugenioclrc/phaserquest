@@ -1,4 +1,5 @@
 node_modules
+/dist/
 standard.pem
 stdEU.pem
 EU-Frankfurt.pem

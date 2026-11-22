@@ -4,32 +4,33 @@ Phaser Quest is a reproduction of Mozilla's [Browserquest](http://browserquest.m
 - The [Phaser](https://phaser.io/) framework for the client 
 - [Socket.io](http://socket.io/) and [Node.js](https://nodejs.org/en/) for the server and client-server communication
 
-## Quick tour of the code
+## Run locally
 
-### Client
+Install Bun 1.3.10 or newer and start MongoDB. Then run:
 
-The game canvas and the game states are created in `js/client/main.js`. The `Home` state is started first, and will display the home page
-of the game. The `Game` state is started upon calling `startGame()` from the `Home` state. 
+```sh
+bun install --frozen-lockfile
+bun run dev
+```
 
-`js/client/game.js` contains the  `Game` object, which corresponds to the `Game` state and contains the bulk of the client code. 
-`Game.init()` is automatically called first by Phaser, to initialize a few variables. `Game.preload()` is then called, to load the
-assets that haven't been loaded in the `Home` state. When all assets are loaded, Phaser calls `Game.create()` where the basics of the game
-are set up. At the end of `Game.create()`, a call is made to `Client.requestData()` (from `js/client/client.js`) to request initialization
-data from the server. Upon reception of this data, `Game.initWorld()` is called, which finishes starting the game. The main update loop of the client is `Game.update()`. 
+Open [http://127.0.0.1:8081](http://127.0.0.1:8081). Vite reloads the browser when client code changes, and Bun restarts the game server when server code changes. Both use the same port.
 
-### Server and updates
+MongoDB defaults to `mongodb://127.0.0.1:27017` and the `phaserQuest` database. Set `MONGODB_URI` or `MONGODB_DB` to change those settings. Set `PORT` to change the HTTP port and `HOST` to change the bind address. Development binds to `127.0.0.1` by default. The existing `-p` and `--mongoPort` options also work, for example `bun run dev -p 8082 --mongoPort 27018`.
 
-`server.js` is the Node.js server that supports the game. Most of the server-side game logic however is located in `js/server/GameServer.js`. Every 200ms, `GameServer.updatePlayers()` is called, and sends updates to all clients (if there are updates to send, as determined by the curstom interest management system). Client-side, these updates are processed by `Game.updateWorld()` and `Game.updateSelf()`. 
+## Production
 
-The code used for the custom binary protocol for the exchange of update packets can be found in `js/client/Decoder.js`, `js/server/Encoder.js` and `js/CODec.js`.
+```sh
+bun run build
+bun run start
+```
 
-## Installing and running the game
+The build writes the browser bundle to `dist/`. The game server serves the bundle and the game assets alongside Socket.IO. Keep `dist/`, `assets/`, and the server code together when deploying. After building, runtime dependencies can be installed with `bun install --frozen-lockfile --production`.
 
-For the client, everything is included in the code (`phaser.js`, `easystar.min.js`, ...). You will need [npm](https://www.npmjs.com/) to install the Node.js packages required for the server. To run the server, you'll need to have Node.js installed, as well as [MongoDB](https://www.mongodb.com/).
+## Code layout
 
-Clone the repository. Inside the newly created directory, run `npm install` to install the Node.js packages listed in `package.json`. Then run `node server.js` to start the server. 
-By default, it'll listen to connections on port `8081`; you can change that behaviour by using the `-p` flag (e.g. `node server.js -p 80`). 
-By default, it'll attempt to connect to MongoDB on port `27017`; you can change that behaviour by using the `--mongoPort` flag (e.g. `node server.js --mongoPort 25000`).
+- `src/entry-game.js` registers the Phaser home and gameplay states.
+- `src/Game.js` handles gameplay rendering and input. `src/Client.js` exchanges updates with the server.
+- `server.js` starts HTTP, Socket.IO, and MongoDB. `js/server/GameServer.js` runs the world simulation and persists characters.
 
 ## Further documentation
 

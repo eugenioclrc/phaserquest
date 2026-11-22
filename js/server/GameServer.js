@@ -3,9 +3,12 @@
  */
 
 const fs = require('fs');
+const path = require('path');
 const PF = require('pathfinding');
 const clone = require('clone'); // used to clone objects, essentially used for clonick update packets
 const rwc = require('random-weighted-choice'); // used to randomly decide which loot a monster should drop
+
+const assetsDir = path.join(__dirname, '..', '..', 'assets');
 
 const GameServer = {
   map: null, // object containing all the data about the world map
@@ -36,7 +39,7 @@ const GameServer = {
 module.exports.GameServer = GameServer;
 module.exports.randomInt = randomInt;
 
-const ObjectId = require('mongodb').ObjectID;
+const { ObjectId } = require('mongodb');
 const spaceMap = require('../spaceMap.js').spaceMap;
 const ChestArea = require('./chestarea.js').ChestArea;
 const AOIutils = require('../AOIutils.js').AOIutils;
@@ -78,15 +81,15 @@ GameServer.makeIDmap = function (collection, map) {
 // Code related to reading map and setting up world
 
 GameServer.readMap = function () {
-  GameServer.db = JSON.parse(fs.readFileSync('./assets/json/db.json').toString()); // Info about monsters, items, etc.
-  GameServer.db.entities = JSON.parse(fs.readFileSync('./assets/json/entities_server.json').toString()); // locations of monsters, objects, chests...
-  GameServer.db.client_entities = JSON.parse(fs.readFileSync('./assets/json/entities_client.json').toString()); // npc
+  GameServer.db = JSON.parse(fs.readFileSync(path.join(assetsDir, 'json/db.json'), 'utf8')); // Info about monsters, items, etc.
+  GameServer.db.entities = JSON.parse(fs.readFileSync(path.join(assetsDir, 'json/entities_server.json'), 'utf8')); // locations of monsters, objects, chests...
+  GameServer.db.client_entities = JSON.parse(fs.readFileSync(path.join(assetsDir, 'json/entities_client.json'), 'utf8')); // npc
   Object.assign(GameServer.db.entities, GameServer.db.client_entities); // merge the last two for convenience
 
   GameServer.db.itemsIDmap = {}; // Make a map to easily fetch string keys based on numerical id's
   GameServer.makeIDmap(GameServer.db.items, GameServer.db.itemsIDmap);
 
-  fs.readFile('./assets/maps/minimap_server.json', 'utf8', (err, data) => {
+  fs.readFile(path.join(assetsDir, 'maps/minimap_server.json'), 'utf8', (err, data) => {
     if (err) throw err;
     GameServer.map = JSON.parse(data);
     GameServer.objects = {};
@@ -260,33 +263,47 @@ GameServer.checkPlayerID = function (id) { // check if no other player is using 
   return (GameServer.players[id] === undefined);
 };
 
-GameServer.addNewPlayer = function (socket, data) {
-    // data is the data object sent by the client to request the creation of a new plaer
-  if (!data.name || data.name.length == 0) return;
+GameServer.addNewPlayer = async function (socket, data) {
+  if (!socket.connected || typeof data.name !== 'string' || !data.name.length) return;
   const player = new Player(data.name);
-  const document = player.dbTrim();
-  GameServer.server.db.collection('players').insertOne(document, (err) => {
-    if (err) throw err;
-    const mongoID = document._id.toString(); // The Mongo driver for NodeJS appends the _id field to the original object reference
-    player.setIDs(mongoID, socket.id);
-    GameServer.finalizePlayer(socket, player);
-    GameServer.server.sendID(socket, mongoID);
-  });
+  let result;
+  try {
+    result = await GameServer.server.db.collection('players').insertOne(player.dbTrim());
+  } catch (err) {
+    console.error('Could not create character', err);
+    if (socket.connected) GameServer.server.sendError(socket, { retryable: true });
+    return;
+  }
+  if (!socket.connected) return;
+  const mongoID = result.insertedId.toString();
+  player.setIDs(mongoID, socket.id);
+  GameServer.finalizePlayer(socket, player);
+  GameServer.server.sendID(socket, mongoID);
 };
 
-GameServer.loadPlayer = function (socket, id) {
-  GameServer.server.db.collection('players').findOne({ _id: new ObjectId(id) }, (err, doc) => {
-    if (err) throw err;
-    if (!doc) {
-      GameServer.server.sendError(socket);
-      return;
-    }
-    const player = new Player();
-    const mongoID = doc._id.toString();
-    player.setIDs(mongoID, socket.id);
-    player.getDataFromDb(doc);
-    GameServer.finalizePlayer(socket, player);
-  });
+GameServer.loadPlayer = async function (socket, id) {
+  if (!socket.connected) return;
+  if (typeof id !== 'string' || !ObjectId.isValid(id)) {
+    GameServer.server.sendError(socket);
+    return;
+  }
+  let document;
+  try {
+    document = await GameServer.server.db.collection('players').findOne({ _id: new ObjectId(id) });
+  } catch (err) {
+    console.error('Could not load character', err);
+    if (socket.connected) GameServer.server.sendError(socket, { retryable: true });
+    return;
+  }
+  if (!socket.connected) return;
+  if (!document) {
+    GameServer.server.sendError(socket);
+    return;
+  }
+  const player = new Player();
+  player.setIDs(document._id.toString(), socket.id);
+  player.getDataFromDb(document);
+  GameServer.finalizePlayer(socket, player);
 };
 
 GameServer.finalizePlayer = function (socket, player) {
@@ -313,21 +330,26 @@ GameServer.embedPlayer = function (player) {
   player.setLastSavedPosition();
 };
 
-GameServer.savePlayer = function (player) {
-    // Save the progress of a player
-  GameServer.server.db.collection('players').updateOne(
-        { _id: new ObjectId(player.getMongoID()) },
-        { $set: player.dbTrim() },
-        (err) => {
-          if (err) throw err;
-        });
-  player.setLastSavedPosition();
+GameServer.savePlayer = async function (player) {
+  const document = player.dbTrim();
+  try {
+    const result = await GameServer.server.db.collection('players').updateOne(
+      { _id: new ObjectId(player.getMongoID()) },
+      { $set: document }
+    );
+    if (result.matchedCount) player.lastSavedPosition = { x: document.x, y: document.y };
+  } catch (err) {
+    console.error('Could not save character', err);
+  }
 };
 
-GameServer.deletePlayer = function (id) {
-  GameServer.server.db.collection('players').deleteOne({ _id: new ObjectId(id) }, (err) => {
-    if (err) throw err;
-  });
+GameServer.deletePlayer = async function (id) {
+  if (typeof id !== 'string' || !ObjectId.isValid(id)) return;
+  try {
+    await GameServer.server.db.collection('players').deleteOne({ _id: new ObjectId(id) });
+  } catch (err) {
+    console.error('Could not delete character', err);
+  }
 };
 
 GameServer.removePlayer = function (socketID) {
@@ -686,10 +708,6 @@ GameServer.clearAOIs = function () {
     GameServer.AOIs[aoi].clear();
   });
   GameServer.dirtyAOIs.clear();
-};
-
-GameServer.listAOIsFromSocket = function (socketID) {
-  return GameServer.getPlayer(socketID).listAdjacentAOIs(false);
 };
 
 GameServer.handleAOItransition = function (entity, previous) {

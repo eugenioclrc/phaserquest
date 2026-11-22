@@ -9,7 +9,6 @@
 import game from './phaser-game';
 import Game from './Game';
 import Client from './Client';
-import Player from './Player';
 
 // used to map the orientation of the player, stored as a number, to the actual
 // name of the orientation
@@ -120,13 +119,12 @@ export default class Being extends Phaser.Sprite {
   }
 
   attack() {
-    const Player = require('./Player').default;
     if (!this.target) return;
     const direction = Game.adjacent(this, this.target);
     if (direction > 0) this.orientation = direction;
     this.animate(`attack_${orientationsDict[this.orientation]}`, false);
     if (this.inCamera) {
-      const sound = (this instanceof Player ? 'hit1' : 'hurt');
+      const sound = (this.types.includes('Player') ? 'hit1' : 'hurt');
       Game.sounds.play(sound);
     }
     if (this.target.deathmark) {
@@ -233,7 +231,7 @@ export default class Being extends Phaser.Sprite {
     const duration = Math.ceil(Math.max(1, (path.length * this.speed) - delta));
     tween.to({ x: xSteps, y: ySteps }, duration);
     // Rate at which the orientation of the sprite will be checked (see below)
-    const checkRate = (this instanceof Player ? 0.7 : 0.4);
+    const checkRate = (this.types.includes('Player') ? 0.7 : 0.4);
     tween.onUpdateCallback(function onUpdateCallback() {
       // At a regular interval (not each frame!), check in which direction the
       // sprite has moved and change its orientation accordingly
@@ -276,8 +274,6 @@ export default class Being extends Phaser.Sprite {
   }
 
   finishMovement(finalOrientation, action) {
-    const Player = require('./Player').default;
-
     // Called whenever a path has been travelled to its end; based on the action
     // object, the appropriate action is taken finalOrientation is a value between
     // 1 and 4 indicatinh the orientation the player should have at the end of the
@@ -292,7 +288,7 @@ export default class Being extends Phaser.Sprite {
       Game.handleLocationAchievements();
     }
     // Check if the path ends on a teleport, and if so, teleport player
-    if (this instanceof Player) {
+    if (this.types.includes('Player')) {
       const door = Game.detectElement(Game.doors, this.x, this.y);
       if (door) finalOrientation = this.teleport(door);
     }

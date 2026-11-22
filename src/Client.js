@@ -2,14 +2,12 @@
  * Created by Jerome on 21-10-16.
  */
 
+import { io } from 'socket.io-client';
 import CoDec from './CoDec';
 import Game from './Game';
 import Decoder from './Decoder';
 
 const Client = {
-  // when events arrive before the flag playerIsInitialized is set to true, they
-  // are not processed and instead are queued in this array ; they will be
-  // processed once the client is initialized and Client.emptyQueue() has been called
   eventsQueue: [],
   // name of the event that triggers the call to initWorld() and the initialization
   // of the game
@@ -18,30 +16,19 @@ const Client = {
   storageNameKey: 'playerName',
   // key in localStorage of player ID
   storageIDKey: 'playerID',
-};
-// Client.socket = io.connect();
-Client.socket = require('socket.io-client')(/*'http://localhost:3000'*/);
-
-// The following checks if the game is initialized or not, and based on this
-// either queues the events or process them
-// The original socket.onevent function is copied to onevent. That way, onevent
-// can be used to call the origianl function, whereas socket.onevent can be
-// modified for our purpose!
-
-const onevent = Client.socket.onevent;
-
-Client.socket.onevent = function oneventEvt(packet) {
-  if (!Game.playerIsInitialized && packet.data[0] != Client.initEventName && packet.data[0] != 'dbError') {
-    Client.eventsQueue.push(packet);
-  } else {
-    onevent.call(this, packet);    // original call
-  }
+  socket: io(),
 };
 
-Client.emptyQueue = function emptyQueue() { // Process the events that have been queued during initialization
-  for (let e = 0; e < Client.eventsQueue.length; e++) {
-    onevent.call(Client.socket, Client.eventsQueue[e]);
-  }
+// World updates depend on sprites and HUD elements created during initialization.
+function onWorldEvent(event, handler) {
+  Client.socket.on(event, (data) => {
+    if (Game.playerIsInitialized) handler(data);
+    else Client.eventsQueue.push(() => handler(data));
+  });
+}
+
+Client.emptyQueue = function emptyQueue() {
+  Client.eventsQueue.splice(0).forEach(run => run());
 };
 
 Client.requestData = function requestData() { // request the data to be used for initWorld()
@@ -61,7 +48,7 @@ Client.isNewPlayer = function isNewPlayer() {
   const name = Client.getName();
   const armor = Client.getArmor();
   const weapon = Client.getWeapon();
-  return !(id !== undefined && name && armor && weapon);
+  return !(id && name && armor && weapon);
 };
 
 Client.setLocalData = function setLocalData(id) { // store the player ID in localStorage
@@ -116,7 +103,7 @@ Client.socket.on(Client.initEventName, (data) => { // This event triggers when r
   Game.updateNbConnected(data.nbconnected);
 });
 
-Client.socket.on('update', (data) => { // This event triggers uppon receiving an update packet (data)
+onWorldEvent('update', (data) => { // This event triggers uppon receiving an update packet (data)
   if (data instanceof ArrayBuffer) data = Decoder.decode(data, CoDec.finalUpdateSchema); // if in binary format, decode first
   Client.socket.emit('ponq', data.stamp);  // send back a pong stamp to compute latency
   if (data.nbconnected !== undefined) Game.updateNbConnected(data.nbconnected);
@@ -125,14 +112,17 @@ Client.socket.on('update', (data) => { // This event triggers uppon receiving an
   if (data.local) Game.updateSelf(data.local);
 });
 
-Client.socket.on('reset', (data) => {
+onWorldEvent('reset', (data) => {
     // If there is a mismatch between client and server coordinates, this event will reset the client to the server coordinates
     // data contains the correct position of the player
   Game.moveCharacter(Game.player.id, data, 0, Game.latency);
 });
 
-Client.socket.on('dbError', () => {
-    // dbError is sent back from the server when the client attempted to connect by sending a player ID that has no match in the database
+Client.socket.on('dbError', (error) => {
+  if (error?.retryable) {
+    Game.displayError('Could not reach the character database. Refresh to try again.');
+    return;
+  }
   localStorage.clear();
   Game.displayError();
 });
@@ -143,7 +133,7 @@ Client.socket.on('wait', () => {
   setTimeout(Client.requestData, 500); // Just try again in 500ms
 });
 
-Client.socket.on('chat', (data) => {
+onWorldEvent('chat', (data) => {
     // chat is sent by the server when another nearby player has said something
   Game.playerSays(data.id, data.txt);
 });
