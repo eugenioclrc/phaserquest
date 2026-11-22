@@ -5,7 +5,7 @@ test('invalid paths leave an accepted route in place', () => {
   const routes: unknown[] = [];
   const player = { x: 0, y: 0, alive: true, setRoute: (path: unknown) => routes.push(path) };
   GameServer.players[1] = player;
-  GameServer.socketMap.session = 1;
+  GameServer.sessionMap.session = 1;
   GameServer.collisionGrid = [[0, 0, 1], [0, 0, 0]];
   GameServer.map = { width: 3, height: 2 };
   GameServer.monstersTable = { 0: { alive: true } };
@@ -29,6 +29,6 @@ test('invalid paths leave an accepted route in place', () => {
     expect(GameServer.handlePath('session', { path: [path[0]], action: { action: 4, ...path[1] }, or: 3 }, 0)).toBe(true);
   } finally {
     delete GameServer.players[1];
-    delete GameServer.socketMap.session;
+    delete GameServer.sessionMap.session;
   }
 });

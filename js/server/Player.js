@@ -29,10 +29,10 @@ class Player extends MovingEntity {
     this.aoi = this.getAOIid();
   }
 
-  setIDs(dbId, socketId) {
+  setIDs(dbId, sessionId) {
     this.id = GameServer.lastPlayerID++;
     GameServer.IDmap[this.id] = dbId;
-    this.socketID = socketId;
+    this.sessionId = sessionId;
   }
 
   getMongoID() {

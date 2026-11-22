@@ -13,7 +13,6 @@ const GameServer = {
   map: null, // object containing all the data about the world map
   mapReady: false, // is the server done processing the map or not
   // frequency of the server update loop ; rate at which the player and monsters objects will call their "update" methods
-  // This is NOT the rate at which updates are sent to clients (see server.clientUpdateRate)
   updateRate: 1000 / 12,
   regenRate: 1000 * 2, // Rate at which the regenerate() method is called
   itemRespawnDelay: 1000 * 30, // Delay (ms) after which a respawnable item will respawn
@@ -29,8 +28,8 @@ const GameServer = {
   lastPlayerID: 0,
   nbConnectedChanged: false, // has the number of connected players changed since last update packet or not
   players: {}, // map of all connected players, fetchable by id
-  socketMap: {}, // map of socket id's to the player id's of the associated players
-  IDmap: {}, // map of player id's to their mondo db uid's
+  sessionMap: Object.create(null), // maps room sessions to entity IDs
+  IDmap: {}, // maps entity IDs to MongoDB IDs
 };
 
 module.exports.GameServer = GameServer;
@@ -46,24 +45,24 @@ const Item = require('./Item.js').Item;
 const UpdatePacket = require('./UpdatePacket.js');
 
 // A few helper functions
-GameServer.addPlayerID = function (socketID, playerID) { // map a socket id to a player id
-  GameServer.socketMap[socketID] = playerID;
+GameServer.addPlayerID = function (sessionId, playerID) { // map a socket id to a player id
+  GameServer.sessionMap[sessionId] = playerID;
 };
 
-GameServer.getPlayerID = function (socketID) {
-  return GameServer.socketMap[socketID];
+GameServer.getPlayerID = function (sessionId) {
+  return GameServer.sessionMap[sessionId];
 };
 
 GameServer.getPlayerAOIid = function (playerID) { // get the id of the AOI a given player is currently in
   return GameServer.players[playerID].getAOIid();
 };
 
-GameServer.getPlayer = function (socketID) { // returns the player corresponding to a specific *socket* ID
-  return GameServer.players[GameServer.getPlayerID(socketID)];
+GameServer.getPlayer = function (sessionId) { // returns the player corresponding to a specific *socket* ID
+  return GameServer.players[GameServer.getPlayerID(sessionId)];
 };
 
-GameServer.deleteSocketID = function (socketID) { // remove a socket id/player id mapping
-  delete GameServer.socketMap[socketID];
+GameServer.deleteSession = function (sessionId) { // remove a socket id/player id mapping
+  delete GameServer.sessionMap[sessionId];
 };
 
 // Create a map between the numerical id's and the string id's of elements of a collection
@@ -77,7 +76,7 @@ GameServer.makeIDmap = function (collection, map) {
 // =========================
 // Code related to reading map and setting up world
 
-GameServer.readMap = function () {
+GameServer.readMap = async function () {
   GameServer.db = JSON.parse(fs.readFileSync(path.join(assetsDir, 'json/db.json'), 'utf8')); // Info about monsters, items, etc.
   GameServer.db.entities = JSON.parse(fs.readFileSync(path.join(assetsDir, 'json/entities_server.json'), 'utf8')); // locations of monsters, objects, chests...
   GameServer.db.client_entities = JSON.parse(fs.readFileSync(path.join(assetsDir, 'json/entities_client.json'), 'utf8')); // npc
@@ -86,74 +85,72 @@ GameServer.readMap = function () {
   GameServer.db.itemsIDmap = {}; // Make a map to easily fetch string keys based on numerical id's
   GameServer.makeIDmap(GameServer.db.items, GameServer.db.itemsIDmap);
 
-  fs.readFile(path.join(assetsDir, 'maps/minimap_server.json'), 'utf8', (err, data) => {
-    if (err) throw err;
-    GameServer.map = JSON.parse(data);
-    GameServer.objects = {};
-    GameServer.layers = [];
-    GameServer.tilesets = {};
+  const data = await fs.promises.readFile(path.join(assetsDir, 'maps/minimap_server.json'), 'utf8');
+  GameServer.map = JSON.parse(data);
+  GameServer.objects = {};
+  GameServer.layers = [];
+  GameServer.tilesets = {};
 
-    for (var l = 0; l < GameServer.map.layers.length; l++) {
-      const layer = GameServer.map.layers[l];
-      if (layer.type == 'objectgroup') {
-        GameServer.objects[layer.name] = layer.objects;
-      } else if (layer.type == 'tilelayer') {
-        GameServer.layers.push(layer.data);
+  for (var l = 0; l < GameServer.map.layers.length; l++) {
+    const layer = GameServer.map.layers[l];
+    if (layer.type == 'objectgroup') {
+      GameServer.objects[layer.name] = layer.objects;
+    } else if (layer.type == 'tilelayer') {
+      GameServer.layers.push(layer.data);
+    }
+  }
+  for (let t = 0; t < GameServer.map.tilesets.length; t++) {
+    const tileset = GameServer.map.tilesets[t];
+    GameServer.tilesets[tileset.name] = tileset.tileproperties;
+  }
+
+      // Iterate over all tiles and work out AOIs and collisions
+  const { tileWidth, tileHeight } = AOIutils;
+  AOIutils.nbAOIhorizontal = Math.ceil(GameServer.map.width / tileWidth);
+  AOIutils.lastAOIid = 0;
+  GameServer.AOIs = {}; // Maps AOI id to AOI object
+  GameServer.dirtyAOIs = new Set(); // Set of AOI's whose update package have changes since last update
+  GameServer.AOIfromTiles = new spaceMap(); // map tiles coordinates to AOI id (e.g. the tile (3,2) is in AOI 0)
+  GameServer.collisionGrid = [];
+  for (let y = 0; y < GameServer.map.height; y++) {
+    const col = [];
+    for (let x = 0; x < GameServer.map.width; x++) {
+              // Work out AOI
+      if (x % tileWidth == 0 && y % tileHeight == 0) { // Create a new AOI at these coordinates
+        const area = new AOI(x, y, tileWidth, tileHeight);
+        GameServer.AOIs[area.id] = area;
       }
-    }
-    for (let t = 0; t < GameServer.map.tilesets.length; t++) {
-      const tileset = GameServer.map.tilesets[t];
-      GameServer.tilesets[tileset.name] = tileset.tileproperties;
-    }
-
-        // Iterate over all tiles and work out AOIs and collisions
-    const { tileWidth, tileHeight } = AOIutils;
-    AOIutils.nbAOIhorizontal = Math.ceil(GameServer.map.width / tileWidth);
-    GameServer.AOIs = {}; // Maps AOI id to AOI object
-    GameServer.dirtyAOIs = new Set(); // Set of AOI's whose update package have changes since last update
-    GameServer.AOIfromTiles = new spaceMap(); // map tiles coordinates to AOI id (e.g. the tile (3,2) is in AOI 0)
-    GameServer.collisionGrid = [];
-    for (let y = 0; y < GameServer.map.height; y++) {
-      const col = [];
-      for (let x = 0; x < GameServer.map.width; x++) {
-                // Work out AOI
-        if (x % tileWidth == 0 && y % tileHeight == 0) { // Create a new AOI at these coordinates
-          const area = new AOI(x, y, tileWidth, tileHeight);
-          GameServer.AOIs[area.id] = area;
-        }
-        GameServer.AOIfromTiles.add(x, y, GameServer.AOIs[AOIutils.idFromCoords(x, y)]);
-                // Work out collisions
-        let collide = false;
-        for (var l = 0; l < GameServer.layers.length; l++) {
-          const tile = GameServer.layers[l][y * GameServer.map.width + x];
-          if (tile) {
-                        // The original BrowserQuest Tiled file doesn't use a collision layer; rather, properties are added to the
-                        // tileset to indicate which tiles causes collisions or not. Which is why we have to check in the tileProperties
-                        // if a given tile has the property "c" or not (= collision)
-            const tileProperties = GameServer.tilesets.tilesheet[tile - 1];
-            if (tileProperties) {
-              if (tileProperties.hasOwnProperty('c')) {
-                collide = true;
-                break;
-              }
+      GameServer.AOIfromTiles.add(x, y, GameServer.AOIs[AOIutils.idFromCoords(x, y)]);
+              // Work out collisions
+      let collide = false;
+      for (var l = 0; l < GameServer.layers.length; l++) {
+        const tile = GameServer.layers[l][y * GameServer.map.width + x];
+        if (tile) {
+                      // The original BrowserQuest Tiled file doesn't use a collision layer; rather, properties are added to the
+                      // tileset to indicate which tiles causes collisions or not. Which is why we have to check in the tileProperties
+                      // if a given tile has the property "c" or not (= collision)
+          const tileProperties = GameServer.tilesets.tilesheet[tile - 1];
+          if (tileProperties) {
+            if (tileProperties.hasOwnProperty('c')) {
+              collide = true;
+              break;
             }
           }
         }
-        col.push(+collide); // "+" to convert boolean to int
       }
-      GameServer.collisionGrid.push(col);
+      col.push(+collide); // "+" to convert boolean to int
     }
-    GameServer.PFgrid = new PF.Grid(GameServer.collisionGrid);
-    GameServer.pathfinder = new PF.AStarFinder();
+    GameServer.collisionGrid.push(col);
+  }
+  GameServer.PFgrid = new PF.Grid(GameServer.collisionGrid);
+  GameServer.pathfinder = new PF.AStarFinder();
 
-    GameServer.setUpDoors();
-    GameServer.setUpEntities();
-    GameServer.setUpChests();
-    GameServer.setUpRoaming();
-    GameServer.setLoops();
-    console.log('Map read');
-    GameServer.mapReady = true;
-  });
+  GameServer.setUpDoors();
+  GameServer.setUpEntities();
+  GameServer.setUpChests();
+  GameServer.setUpRoaming();
+  console.log('Map read');
+  GameServer.mapReady = true;
 };
 
 GameServer.setUpDoors = function () { // Set up teleports
@@ -245,18 +242,6 @@ GameServer.setUpRoaming = function () { // Sets up packs of randomly positioned 
   }
 };
 
-GameServer.setLoops = function () { // Sets up the server update loop, and the regenration loop
-  setInterval(GameServer.update, GameServer.updateRate);
-  setInterval(GameServer.regenerate, GameServer.regenRate);
-};
-
-// ==============================
-// Code related to managin the player: create new one, fetch from db, remove, ...
-
-GameServer.checkSocketID = function (id) { // check if no other player is using same socket ID
-  return (GameServer.getPlayerID(id) === undefined);
-};
-
 GameServer.loadPlayer = async function (sessionId, id, isConnected) {
   const document = await GameServer.characters.open(id);
   const mongoId = document._id.toString();
@@ -281,7 +266,7 @@ GameServer.createInitializationPacket = function (playerID) {
     // Create the packet that the client will receive from the server in order to initialize the game
   return {
     player: GameServer.players[playerID].trim(), // info about the player
-    nbconnected: GameServer.server.getNbConnected(),
+    nbconnected: Object.keys(GameServer.players).length,
     nbAOIhorizontal: AOIutils.nbAOIhorizontal, // info about AOI's
     lastAOIid: AOIutils.lastAOIid,
   };
@@ -302,8 +287,9 @@ GameServer.savePlayer = async function (player) {
   }
 };
 
-GameServer.removePlayer = async function (socketID) {
-  const player = GameServer.getPlayer(socketID);
+GameServer.removePlayer = async function (sessionId) {
+  const player = GameServer.getPlayer(sessionId);
+  if (!player) return;
   GameServer.removeFromLocation(player);
   player.setProperty('connected', false);
   player.die();
@@ -313,7 +299,7 @@ GameServer.removePlayer = async function (socketID) {
   });
   delete GameServer.players[player.id];
   GameServer.nbConnectedChanged = true;
-  GameServer.deleteSocketID(socketID);
+  GameServer.deleteSession(sessionId);
   await GameServer.characters.close(player.getMongoID());
   delete GameServer.IDmap[player.id];
 };
@@ -478,7 +464,7 @@ GameServer.respawnCount = function (x, y, object, callback, delay) { // Sets tim
     // object is the game object to respawn (a monster or an item)
     // callback is the function that should be call to make it respawn
     // delay is the amoutn of ms to wait before calling the callback
-  setTimeout(GameServer.respawnSomething, delay, x, y, object, callback);
+  GameServer.schedule(GameServer.respawnSomething, delay, x, y, object, callback);
 };
 
 GameServer.respawnSomething = function (x, y, object, callback) {
@@ -562,7 +548,7 @@ GameServer.setUpFight = function (A, B) {
 };
 
 GameServer.handleKill = function (killer, target) {
-  setTimeout(() => {
+  GameServer.schedule(() => {
     if (GameServer.db.monsters[target.name]) killer.updatePacket.addKilled(GameServer.db.monsters[target.name].id);
   }, 400);
 };
@@ -601,7 +587,7 @@ GameServer.dropLoot = function (table, x, y) {
 GameServer.spawnHiddenChest = function (properties) { // If all the monsters in a chest area have been killed, spawn the corresponding chest
   if (GameServer.items.getFirstFiltered(properties.x, properties.y, ['visible'])) return;
   const chest = new Item(properties.x, properties.y, properties.items, false, true, false);  // no respawn, chest, not loot
-  setTimeout((properties, chest) => {
+  GameServer.schedule((properties, chest) => {
     GameServer.addAtLocation(chest);
   }, 500, properties, chest);
 };
@@ -627,7 +613,7 @@ GameServer.regenerate = function () {
   });
 };
 
-GameServer.updatePlayers = function () { // Function responsible for setting up and sending update packets to clients
+GameServer.updatePlayers = function (sendUpdate) { // Function responsible for setting up and sending update packets to clients
   Object.keys(GameServer.players).forEach((key) => {
     const player = GameServer.players[key];
     const localPkg = player.getIndividualUpdatePackage(); // the local pkg is player-specific
@@ -643,8 +629,8 @@ GameServer.updatePlayers = function () { // Function responsible for setting up 
     const finalPackage = {};
     if (individualGlobalPkg) finalPackage.global = individualGlobalPkg.clean();
     if (localPkg) finalPackage.local = localPkg.clean();
-    if (GameServer.nbConnectedChanged) finalPackage.nbconnected = GameServer.server.getNbConnected();
-    GameServer.server.sendUpdate(player.socketID, finalPackage);
+    if (GameServer.nbConnectedChanged) finalPackage.nbconnected = Object.keys(GameServer.players).length;
+    sendUpdate(player.sessionId, finalPackage);
     player.newAOIs = [];
   });
   GameServer.nbConnectedChanged = false;

@@ -49,7 +49,7 @@ class Item extends GameObject {
   }
 
   makeTemporary() {
-    setTimeout((item) => {
+    GameServer.schedule((item) => {
       item.pick();
     }, GameServer.itemVanishDelay, this);
   }

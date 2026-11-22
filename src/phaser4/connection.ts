@@ -1,9 +1,6 @@
-import { io, type Socket } from 'socket.io-client';
-import { CoDec, type ObjectSchema } from '../../shared/CoDec.ts';
-import Decoder from '../Decoder.ts';
+import { Client, type Room } from '@colyseus/sdk';
+import { CharacterJoinError } from '../../shared/WorldProtocol.ts';
 import type { PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
-
-type EntryRequest = { id: string };
 
 type Initialization = {
   stamp: number;
@@ -18,23 +15,6 @@ type Update = {
   global?: WorldUpdate;
   local?: PersonalUpdate;
   nbconnected?: number;
-};
-
-type ServerEvents = {
-  init(data: ArrayBuffer | Initialization): void;
-  update(data: ArrayBuffer | Update): void;
-  reset(tile: Tile | null): void;
-  chat(message: { id: number; txt: string }): void;
-  dbError(error: { code: string }): void;
-  wait(): void;
-};
-
-type ClientEvents = {
-  'init-world'(request: EntryRequest & { clientTime: number }): void;
-  ponq(stamp: number): void;
-  path(movement: { path: Tile[]; action: PathAction; or: number }): void;
-  revive(): void;
-  chat(text: string): void;
 };
 
 type ConnectionEvents = {
@@ -89,102 +69,108 @@ async function createCharacter(name: string): Promise<string> {
   return id;
 }
 
-function characterMessage(code: string): string {
-  if (code === 'missing') return 'This saved character could not be found.';
-  if (code === 'busy') return 'This character is already in the game. Try again after leaving.';
+function characterMessage(code?: number): string {
+  if (code === CharacterJoinError.missing) return 'This saved character could not be found.';
+  if (code === CharacterJoinError.busy) return 'This character is already in the game. Try again after leaving.';
   return 'Could not reach the character database. Try again.';
 }
 
-function unpack<T>(data: ArrayBuffer | T, schema: ObjectSchema): T {
-  return data instanceof ArrayBuffer ? Decoder.decode(data, schema) as T : data;
-}
-
 export function createConnection(events: ConnectionEvents) {
-  const socket: Socket<ServerEvents, ClientEvents> = io({ autoConnect: false });
-  let request: EntryRequest | null = null;
+  const sdk = new Client(window.location.origin);
+  let room: Room | undefined;
+  let characterId: string | undefined;
   let entered = false;
-  let retry: number | undefined;
   let deleting = false;
   let creating = false;
 
-  function cancelRetry() {
-    window.clearTimeout(retry);
-    retry = undefined;
+  function sendAction(type: string, payload?: unknown): boolean {
+    if (!entered || !room?.connection.isOpen) return false;
+    room.send(type, payload);
+    return true;
   }
 
-  function requestEntry() {
-    if (request && !entered && socket.connected) {
-      socket.emit('init-world', { ...request, clientTime: Date.now() });
-    }
-  }
-
-  function sendAction(emit: () => void): boolean {
-    if (!entered || !socket.connected) return false;
-    const buffered = socket.sendBuffer.length;
-    let sent = false;
-    const markSent = () => { sent = true; };
-    socket.onAnyOutgoing(markSent);
+  async function join(id: string, resume = true) {
+    const key = 'worldReconnection:' + id;
     try {
-      emit();
-      return sent;
-    } finally {
-      socket.offAnyOutgoing(markSent);
-      // Drop actions Socket.IO buffered for a future connection after heartbeat expiry.
-      if (!sent) socket.sendBuffer.splice(buffered);
+      let next: Room | undefined;
+      if (resume) {
+        const token = sessionStorage.getItem(key);
+        if (token) {
+          try {
+            next = await sdk.reconnect(token);
+          } catch {
+            sessionStorage.removeItem(key);
+          }
+        }
+      }
+      next ??= await sdk.join('world', { id });
+      room = next;
+      next.reconnection.minUptime = 0;
+      next.reconnection.maxEnqueuedMessages = 0;
+      let dropped = false;
+
+      function ready() {
+        sessionStorage.setItem(key, next!.reconnectionToken);
+        next!.send('ready');
+      }
+
+      next.onDrop(() => {
+        dropped = true;
+        entered = false;
+        events.pending('Connection lost. Reconnecting…');
+      });
+      next.onReconnect(() => {
+        dropped = false;
+        ready();
+      });
+      next.onLeave(() => {
+        if (room !== next) return;
+        room = undefined;
+        entered = false;
+        sessionStorage.removeItem(key);
+        if (dropped) void join(id, false);
+        else {
+          characterId = undefined;
+          events.error('Lost the connection to the game. Try again.');
+        }
+      });
+      next.onMessage('entryError', (code: number) => {
+        if (room !== next) return;
+        room = undefined;
+        characterId = undefined;
+        entered = false;
+        sessionStorage.removeItem(key);
+        if (code === CharacterJoinError.missing) clearCharacter(id);
+        events.error(characterMessage(code));
+        void next!.leave();
+      });
+      next.onMessage('init', (data: Initialization) => {
+        entered = true;
+        next!.send('ponq', data.stamp);
+        events.enter(data.player, data.nbAOIhorizontal, data.lastAOIid);
+        events.online(data.nbconnected);
+      });
+      next.onMessage('update', (data: Update) => {
+        if (!entered) return;
+        next!.send('ponq', data.stamp);
+        if (data.nbconnected !== undefined) events.online(data.nbconnected);
+        if (data.global) events.updateWorld(data.global);
+        if (data.local) events.updateSelf(data.local);
+      });
+      next.onMessage('reset', (tile: Tile | null) => { if (entered && tile) events.reset(tile); });
+      next.onMessage('chat', ({ id: sender, txt }: { id: number; txt: string }) => { if (entered) events.say(sender, txt); });
+      ready();
+    } catch (error) {
+      const code = (error as { code?: number }).code;
+      characterId = undefined;
+      if (code === CharacterJoinError.missing) clearCharacter(id);
+      events.error(characterMessage(code));
     }
   }
-
-  socket.on('connect', requestEntry);
-  socket.on('disconnect', () => {
-    entered = false;
-    cancelRetry();
-    if (request) events.pending('Connection lost. Reconnecting…');
-  });
-  socket.on('connect_error', () => {
-    if (request) events.pending('Could not connect to the game server. Retrying…');
-  });
-
-  socket.on('wait', () => {
-    if (!request || entered || retry !== undefined) return;
-    events.pending('Waiting for the game world…');
-    retry = window.setTimeout(() => {
-      retry = undefined;
-      requestEntry();
-    }, 500);
-  });
-
-  socket.on('init', (payload) => {
-    if (!request || entered) return;
-    cancelRetry();
-    const data = unpack(payload, CoDec.initializationSchema);
-    entered = true;
-    socket.emit('ponq', data.stamp);
-    events.enter(data.player, data.nbAOIhorizontal, data.lastAOIid);
-    events.online(data.nbconnected);
-  });
-
-  socket.on('update', (payload) => {
-    if (!entered) return;
-    const data = unpack(payload, CoDec.finalUpdateSchema);
-    socket.emit('ponq', data.stamp);
-    if (data.nbconnected !== undefined) events.online(data.nbconnected);
-    if (data.global) events.updateWorld(data.global);
-    if (data.local) events.updateSelf(data.local);
-  });
-
-  socket.on('reset', (tile) => { if (entered && tile) events.reset(tile); });
-  socket.on('chat', ({ id, txt }) => { if (entered) events.say(id, txt); });
-  socket.on('dbError', ({ code }) => {
-    if (!request || entered) return;
-    cancelRetry();
-    if (code === 'missing') clearCharacter(request.id);
-    request = null;
-    events.error(characterMessage(code));
-  });
 
   return {
     async deleteCharacter(id: string): Promise<boolean> {
-      if (deleting || creating || request || savedCharacter()?.id !== id) return false;
+      if (deleting || creating || characterId || savedCharacter()?.id !== id) return false;
       deleting = true;
       try {
         const response = await postCharacter('/api/characters/delete', { id });
@@ -198,14 +184,14 @@ export function createConnection(events: ConnectionEvents) {
       }
     },
     async play(name?: string) {
-      if (request || creating || deleting) return;
+      if (characterId || creating || deleting) return;
       if (name === undefined) {
         const saved = savedCharacter();
         if (!saved) {
           events.error('There is no saved character to load.');
           return;
         }
-        request = { id: saved.id };
+        characterId = saved.id;
       } else {
         const playerName = name.trim();
         if (!playerName || playerName.length > 20) {
@@ -214,7 +200,7 @@ export function createConnection(events: ConnectionEvents) {
         }
         creating = true;
         try {
-          request = { id: await createCharacter(playerName) };
+          characterId = await createCharacter(playerName);
         } catch {
           events.error('Could not create the character. Try again.');
           return;
@@ -222,19 +208,18 @@ export function createConnection(events: ConnectionEvents) {
           creating = false;
         }
       }
-      if (socket.connected) requestEntry();
-      else socket.connect();
+      await join(characterId);
     },
     move(path: Tile[], orientation: number, action: PathAction = { action: 0 }): boolean {
       if (path.length < (action.action === 0 ? 2 : 1) || path.length > 60) return false;
-      return sendAction(() => socket.emit('path', { path, action, or: orientation }));
+      return sendAction('path', { path, action, or: orientation });
     },
     revive(): boolean {
-      return sendAction(() => socket.emit('revive'));
+      return sendAction('revive');
     },
     chat(text: string): boolean {
       if (!text.trim() || text.length > 300) return false;
-      return sendAction(() => socket.emit('chat', text));
+      return sendAction('chat', text);
     },
   };
 }

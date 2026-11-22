@@ -10,3 +10,9 @@ export interface PathCommand {
   action: PathAction;
   or: number;
 }
+
+export const CharacterJoinError = {
+  missing: 4404,
+  busy: 4409,
+  unavailable: 4503,
+} as const;

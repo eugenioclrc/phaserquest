@@ -129,7 +129,7 @@ class MovingEntity extends GameObject {
     this.setProperty('alive', false);
     if (this.constructor.name == 'Monster') {
       GameServer.respawnCount(this.startX, this.startY, this, this.respawn, GameServer.monsterRespawnDelay);
-      setTimeout(GameServer.dropLoot, 200, this.lootTable, this.x, this.y);
+      GameServer.schedule(GameServer.dropLoot, 200, this.lootTable, this.x, this.y);
       if (this.chestArea) this.chestArea.decrement();
     }
   }
@@ -177,7 +177,7 @@ class MovingEntity extends GameObject {
 
   switchOpponent() {
     if (this.foes.length) {
-      setTimeout((_entity) => {
+      GameServer.schedule((_entity) => {
         GameServer.setUpFight(_entity, _entity.foes[0]);
       }, 300, this);
     }
