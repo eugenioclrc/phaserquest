@@ -16,6 +16,16 @@ type ItemDefinition = {
 
 type ItemView = { data: ItemSnapshot; sprite: Phaser.GameObjects.Image };
 
+type NpcDefinition = { atlasKey: string; nbFrames: number; dialogue: string[]; customAnchor?: Tile };
+type MapEntity = { npc?: boolean; sprite: string };
+type Speaker = { bubble: Phaser.GameObjects.Text; speechTimer?: Phaser.Time.TimerEvent };
+type NpcView = Speaker & {
+  tile: Tile;
+  sprite: Phaser.GameObjects.Sprite;
+  dialogue: string[];
+  nextLine: number;
+};
+
 type Door = {
   to: Tile;
   orientation?: Direction;
@@ -26,12 +36,11 @@ type Door = {
 
 type DoorCrossing = { path: Tile[]; door: Door; previous?: Door };
 
-type Avatar = {
+type Avatar = Speaker & {
   container: Phaser.GameObjects.Container;
   armor: Phaser.GameObjects.Image;
   weapon: Phaser.GameObjects.Image;
   name: Phaser.GameObjects.Text;
-  bubble: Phaser.GameObjects.Text;
   armorKey: string;
   weaponKey: string;
   direction: Direction;
@@ -40,9 +49,9 @@ type Avatar = {
   targetID?: number;
   aoi?: number;
   motion?: Phaser.Tweens.Tween;
-  speechTimer?: Phaser.Time.TimerEvent;
 };
 
+const npcTilesetFirstGid = 1961;
 const idleFrame = { 1: 42, 2: 20, 3: 9, 4: 31 };
 const walkFrame = { 1: 38, 2: 16, 3: 5, 4: 27 };
 const attackFrame = { 1: 33, 2: 11, 3: 0, 4: 22 };
@@ -78,6 +87,8 @@ export class WorldScene extends Phaser.Scene {
   private readonly species = new Map<number, { key: string; definition: MonsterDefinition }>();
   private readonly items = new Map<number, ItemView>();
   private readonly itemDefinitions = new Map<number, ItemDefinition & { key: string }>();
+  private readonly npcs = new Map<string, NpcView>();
+  private firstDialogueShown = false;
   private damageLabels?: Phaser.GameObjects.Group;
   private readonly doors = new Map<string, Door>();
   private readonly crossingsByDestination = new Map<string, DoorCrossing>();
@@ -96,6 +107,7 @@ export class WorldScene extends Phaser.Scene {
     private readonly onPath: (path: Tile[], orientation: number, action?: PathAction) => boolean,
     private readonly onHeroAlive: (alive: boolean) => void,
     private readonly onHeroEquipment: (slot: 'armor' | 'weapon', key: string) => void,
+    private readonly onFirstDialogue?: () => void,
   ) {
     super('world');
   }
@@ -107,6 +119,7 @@ export class WorldScene extends Phaser.Scene {
     this.load.atlas('players', '/assets/sprites/atlas3.png', '/assets/sprites/atlas3.json');
     this.load.atlas('monsters', '/assets/sprites/atlas4.png', '/assets/sprites/atlas4.json');
     this.load.json('db', '/assets/json/db.json');
+    this.load.json('entities', '/assets/json/entities_client.json');
   }
 
   create() {
@@ -126,6 +139,12 @@ export class WorldScene extends Phaser.Scene {
         return tile !== null && Object.hasOwn(tile.properties, 'c');
       }))),
     );
+    const { items, monsters, npc } = this.cache.json.get('db') as {
+      items: Record<string, ItemDefinition>;
+      monsters: Record<string, MonsterDefinition>;
+      npc: Record<string, NpcDefinition>;
+    };
+    this.createNpcs(map, npc);
     this.pathfinder.setGrid(this.collision);
     this.pathfinder.setAcceptableTiles(0);
     this.pathfinder.enableSync();
@@ -154,9 +173,6 @@ export class WorldScene extends Phaser.Scene {
       });
     }
 
-    const { items, monsters } = this.cache.json.get('db') as {
-      items: Record<string, ItemDefinition>; monsters: Record<string, MonsterDefinition>;
-    };
     for (const [key, item] of Object.entries(items)) this.itemDefinitions.set(item.id, { ...item, key });
     for (const [key, definition] of Object.entries(monsters)) this.species.set(definition.id, { key, definition });
     this.damageLabels = this.add.group();
@@ -169,6 +185,7 @@ export class WorldScene extends Phaser.Scene {
       this.avatars.clear();
       this.monsters.clear();
       this.items.clear();
+      this.npcs.clear();
     });
     this.onReady();
   }
@@ -301,10 +318,7 @@ export class WorldScene extends Phaser.Scene {
 
   say(id: number, text: string) {
     const avatar = this.avatars.get(id);
-    if (!avatar?.alive) return;
-    avatar.speechTimer?.remove();
-    avatar.bubble.setText(text).setVisible(Boolean(text));
-    avatar.speechTimer = this.time.delayedCall(5000, () => avatar.bubble.setVisible(false));
+    if (avatar?.alive) this.showSpeech(avatar, text);
   }
 
   leave() {
@@ -321,6 +335,11 @@ export class WorldScene extends Phaser.Scene {
     for (const { sprite } of this.items.values()) sprite.destroy();
     this.items.clear();
     this.damageLabels?.clear(true, true);
+    this.firstDialogueShown = false;
+    for (const npc of this.npcs.values()) {
+      npc.nextLine = 0;
+      this.showSpeech(npc, '');
+    }
   }
 
   private setHeroCamera(hero: Avatar, door?: Door) {
@@ -373,6 +392,61 @@ export class WorldScene extends Phaser.Scene {
     this.items.delete(data.id);
   }
 
+  private createNpcs(map: Phaser.Tilemaps.Tilemap, definitions: Record<string, NpcDefinition>) {
+    const entities = this.cache.json.get('entities') as Record<number, MapEntity>;
+    for (const { x, y, gid } of map.getObjectLayer('entities')?.objects ?? []) {
+      if (x === undefined || y === undefined || gid === undefined) continue;
+      const entity = entities[gid - npcTilesetFirstGid];
+      const definition = entity?.npc ? definitions[entity.sprite] : undefined;
+      if (!definition) continue;
+      const tile = { x: Math.floor(x / this.tileWidth), y: Math.floor(y / this.tileHeight) };
+      this.collision[tile.y][tile.x] = 1;
+      const { atlasKey, customAnchor, nbFrames, dialogue } = definition;
+      this.add.image(x, y + 4, 'atlas1', 'shadow').setOrigin(0).setDepth(y - 0.25);
+      const sprite = this.add.sprite(x, y, 'atlas1', `${atlasKey}_0`)
+        .setOrigin(customAnchor?.x ?? 0, customAnchor?.y ?? 0.25).setDepth(y)
+        .setInteractive({ cursor: 'url(/assets/sprites/talk.png), auto' });
+      if (nbFrames > 1) {
+        const animation = `npc-${atlasKey}`;
+        if (!this.anims.exists(animation)) {
+          this.anims.create({
+            key: animation,
+            frames: this.anims.generateFrameNames('atlas1', { prefix: `${atlasKey}_`, end: nbFrames - 1 }),
+            frameRate: 2,
+            repeat: -1,
+          });
+        }
+        sprite.play(animation);
+      }
+      const bubble = this.makeSpeechBubble(x + this.tileWidth / 2, y - sprite.displayOriginY - 13)
+        .setDepth(map.heightInPixels + map.layers.length);
+      this.npcs.set(tileKey(tile), { tile, sprite, bubble, dialogue, nextLine: 0 });
+    }
+  }
+
+  private makeSpeechBubble(x: number, y: number) {
+    return this.add.text(x, y, '', {
+      fontSize: '14px', color: '#20190f', backgroundColor: '#fff5d9', align: 'center',
+      wordWrap: { width: 200 }, padding: { x: 6, y: 4 },
+    }).setOrigin(0.5, 1).setVisible(false);
+  }
+
+  private showSpeech(speaker: Speaker, text: string) {
+    speaker.speechTimer?.remove();
+    speaker.bubble.setText(text).setVisible(Boolean(text));
+    speaker.speechTimer = text ? this.time.delayedCall(5000, () => speaker.bubble.setVisible(false)) : undefined;
+  }
+
+  private speak(npc: NpcView) {
+    const line = npc.dialogue[npc.nextLine] ?? '';
+    npc.nextLine = (npc.nextLine + 1) % (npc.dialogue.length + 1);
+    this.showSpeech(npc, line);
+    if (line && !this.firstDialogueShown) {
+      this.firstDialogueShown = true;
+      this.onFirstDialogue?.();
+    }
+  }
+
   private addAvatar(player: PlayerSnapshot): Avatar {
     const current = this.avatars.get(player.id);
     if (current) {
@@ -386,10 +460,7 @@ export class WorldScene extends Phaser.Scene {
       fontSize: '14px', color: player.id === this.heroId ? '#f4d442' : '#ffffff',
       stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5, 1);
-    const bubble = this.add.text(16, -43, '', {
-      fontSize: '14px', color: '#20190f', backgroundColor: '#fff5d9', align: 'center',
-      wordWrap: { width: 200 }, padding: { x: 6, y: 4 },
-    }).setOrigin(0.5, 1).setVisible(false);
+    const bubble = this.makeSpeechBubble(16, -43);
     container.add([armor, weapon, name, bubble]);
     const avatar: Avatar = {
       container, armor, weapon, name, bubble, armorKey: 'clotharmor', weaponKey: 'sword1',
@@ -453,15 +524,15 @@ export class WorldScene extends Phaser.Scene {
     if (!hero?.alive) return;
     const at = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
     const clicked = { x: Math.floor(at.x / this.tileWidth), y: Math.floor(at.y / this.tileHeight) };
-    const target: { tile: Tile; action: PathAction; rank: number } = {
+    const target: { tile: Tile; action: PathAction; rank: number; npc?: NpcView } = {
       tile: clicked, action: { action: 0 }, rank: hits.length + 1,
     };
-    const consider = (sprite: Phaser.GameObjects.Image, tile: Tile, action: PathAction) => {
+    const consider = (sprite: Phaser.GameObjects.GameObject, tile: Tile, action: PathAction, npc?: NpcView) => {
       // Phaser provides render-sorted hits. Tile matches are a fallback.
       const hit = hits.indexOf(sprite);
       const rank = hit >= 0 ? hit : hits.length;
       if (rank >= target.rank || (hit < 0 && tileDistance(tile, clicked) !== 0)) return;
-      Object.assign(target, { tile, action, rank });
+      Object.assign(target, { tile, action, rank, npc });
     };
     for (const [id, monster] of this.monsters) {
       if (monster.alive) consider(monster.sprite, monster.tile, { action: 3, id });
@@ -469,15 +540,24 @@ export class WorldScene extends Phaser.Scene {
     for (const { data, sprite } of this.items.values()) {
       if (sprite.visible) consider(sprite, data, data.inChest ? { action: 4, x: data.x, y: data.y } : { action: 0 });
     }
-    const { tile: end, action } = target;
+    for (const npc of this.npcs.values()) consider(npc.sprite, npc.tile, { action: 0 }, npc);
+    const { tile, action, npc } = target;
+    const end = npc ? { x: tile.x, y: tile.y + 1 } : tile;
     const start = this.tileAt(hero);
+    if (npc && tileDistance(start, end) === 0) {
+      if (hero.motion) return;
+      hero.direction = 2;
+      this.showFrame(hero, idleFrame[hero.direction]);
+      this.speak(npc);
+      return;
+    }
     if (tileDistance(start, end) > 28) return;
     const path = this.findPath(start, end);
     if (!path || path.length < 2) return;
-    const orientation = directionBetween(path[path.length - 2], end);
+    const orientation = npc ? 2 : directionBetween(path[path.length - 2], end);
     if (action.action !== 0) path.pop();
     if (path.length > 60 || !this.onPath(path, orientation, action)) return;
-    this.move(hero, path, orientation);
+    this.move(hero, path, orientation, 0, npc ? () => this.speak(npc) : undefined);
   }
 
   private findPath(start: Tile, end: Tile): Tile[] | null {
@@ -488,7 +568,7 @@ export class WorldScene extends Phaser.Scene {
     return path;
   }
 
-  private move(avatar: Avatar, path: Tile[], orientation?: number, latency = 0) {
+  private move(avatar: Avatar, path: Tile[], orientation?: number, latency = 0, onComplete?: () => void) {
     avatar.motion?.stop();
     const end = path[path.length - 1];
     const door = this.doors.get(tileKey(end));
@@ -527,6 +607,7 @@ export class WorldScene extends Phaser.Scene {
             this.setHeroCamera(avatar, crossing.door);
           }
         }
+        onComplete?.();
       },
     });
   }
