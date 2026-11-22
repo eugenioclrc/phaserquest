@@ -101,6 +101,8 @@ async function start() {
     } finally {
       await mongo.close();
     }
+    // Bun may keep transport handles alive after the listeners close.
+    process.exit(0);
   }
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
