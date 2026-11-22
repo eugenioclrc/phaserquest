@@ -3,6 +3,7 @@
  */
 
 const GameServer = require('./GameServer.js').GameServer;
+const { playerStepMs } = require('../../shared/WorldProtocol.ts');
 // Parent class of monsters and players
 const MovingEntity = require('./MovingEntity.js');
 const PersonalUpdatePacket = require('./PersonalUpdatePacket.js');
@@ -18,43 +19,27 @@ class Player extends MovingEntity {
     this.category = 'player';
     this.maxLife = 100;
     this.life = this.maxLife;
-    this.speed = 120;
+    this.speed = playerStepMs;
     this.equip(1, 'sword1');
     this.equip(2, 'clotharmor');
     this.updatePacket = new PersonalUpdatePacket();
-    this.newAOIs = [];
   }
 
   setAOI() {
     this.aoi = this.getAOIid();
   }
 
-  setIDs(dbId, sessionId) {
+  setIDs(dbId) {
     this.id = GameServer.lastPlayerID++;
-    GameServer.IDmap[this.id] = dbId;
-    this.sessionId = sessionId;
+    this.mongoId = dbId;
   }
 
   getMongoID() {
-    return GameServer.IDmap[this.id];
+    return this.mongoId;
   }
 
   setLastSavedPosition() {
     this.lastSavedPosition = { x: this.x, y: this.y };
-  }
-
-  trim() {
-    // Return a smaller object, containing a subset of the initial properties, to be sent to the client
-    const trimmed = {};
-    const broadcastProperties = ['id', 'name', 'weapon', 'armor', 'inFight', 'alive', 'aoi']; // list of properties relevant for the client
-    for (let p = 0; p < broadcastProperties.length; p++) {
-      trimmed[broadcastProperties[p]] = this[broadcastProperties[p]];
-    }
-    trimmed.x = parseInt(this.x, 10);
-    trimmed.y = parseInt(this.y, 10);
-    if (this.route) trimmed.route = this.route.trim(this.category);
-    if (this.target) trimmed.targetID = this.target.id;
-    return trimmed;
   }
 
   dbTrim() {
@@ -73,10 +58,9 @@ class Player extends MovingEntity {
   getDataFromDb(document) {
     // Set up the player based on the data stored in the databse
     // document is the mongodb document retrieved form the database
-    const dbProperties = ['x', 'y', 'name'];
-    for (let p = 0; p < dbProperties.length; p++) {
-      this[dbProperties[p]] = document[dbProperties[p]];
-    }
+    this.x = Number(document.x);
+    this.y = Number(document.y);
+    this.name = document.name;
     this.setAOI();
     this.equip(1, document.weapon);
     this.equip(2, document.armor);
@@ -154,6 +138,7 @@ class Player extends MovingEntity {
   }
 
   teleport(door) {
+    this.lastDoor = { x: this.x, y: this.y };
     this.x = door.to.x;
     this.y = door.to.y;
     this.updatePacket.teleport = { x: this.x, y: this.y };
@@ -163,6 +148,7 @@ class Player extends MovingEntity {
 
   revive() {
     if (this.alive) return;
+    this.lastDoor = undefined;
     this.respawnAt(this.lastSavedPosition.x, this.lastSavedPosition.y);
     this.updatePacket.updatePosition(this.x, this.y);
   }

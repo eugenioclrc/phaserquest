@@ -16,6 +16,7 @@ export class MonsterView {
   inFight = false;
   targetID?: number;
   private facing = 'down';
+  private routeVersion?: number;
   private route?: { path: Tile[]; start: number };
   private diedAt?: number;
 
@@ -39,11 +40,13 @@ export class MonsterView {
   }
 
   apply(changes: Partial<MonsterSnapshot>, now: number) {
-    if (changes.x !== undefined && changes.y !== undefined) {
+    const changedRoute = changes.routeVersion !== undefined && changes.routeVersion !== this.routeVersion;
+    if (changes.routeVersion !== undefined) this.routeVersion = changes.routeVersion;
+    if ((changedRoute || !changes.route) && changes.x !== undefined && changes.y !== undefined) {
       this.place(changes.x, changes.y);
       this.route = undefined;
     }
-    if (changes.targetID !== undefined) this.targetID = changes.targetID;
+    if (changes.targetID !== undefined) this.targetID = changes.targetID < 0 ? undefined : changes.targetID;
     if (changes.inFight !== undefined) this.inFight = changes.inFight;
     if (changes.alive !== undefined) {
       if (!changes.alive && this.alive) this.diedAt = now;
@@ -56,7 +59,7 @@ export class MonsterView {
     } else {
       this.sprite.setVisible(true);
       const route = changes.route;
-      if (route?.path.length) {
+      if (changedRoute && route?.path.length) {
         const offset = route.path.findIndex(tile => tile.x === changes.x && tile.y === changes.y);
         this.route = { path: route.path, start: now - route.delta - Math.max(0, offset) * this.definition.speed };
       }

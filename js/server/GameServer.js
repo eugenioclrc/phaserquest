@@ -28,10 +28,8 @@ const GameServer = {
   lastItemID: 0, // ID of the last item object created
   lastMonsterID: 0,
   lastPlayerID: 0,
-  nbConnectedChanged: false, // has the number of connected players changed since last update packet or not
   players: {}, // map of all connected players, fetchable by id
   sessionMap: Object.create(null), // maps room sessions to entity IDs
-  IDmap: {}, // maps entity IDs to MongoDB IDs
 };
 
 module.exports.GameServer = GameServer;
@@ -44,27 +42,9 @@ const AOI = require('./AOI.js').AOI;
 const Player = require('./Player.js').Player;
 const Monster = require('./Monster.js').Monster;
 const Item = require('./Item.js').Item;
-const UpdatePacket = require('./UpdatePacket.js');
 
-// A few helper functions
-GameServer.addPlayerID = function (sessionId, playerID) { // map a socket id to a player id
-  GameServer.sessionMap[sessionId] = playerID;
-};
-
-GameServer.getPlayerID = function (sessionId) {
-  return GameServer.sessionMap[sessionId];
-};
-
-GameServer.getPlayerAOIid = function (playerID) { // get the id of the AOI a given player is currently in
-  return GameServer.players[playerID].getAOIid();
-};
-
-GameServer.getPlayer = function (sessionId) { // returns the player corresponding to a specific *socket* ID
-  return GameServer.players[GameServer.getPlayerID(sessionId)];
-};
-
-GameServer.deleteSession = function (sessionId) { // remove a socket id/player id mapping
-  delete GameServer.sessionMap[sessionId];
+GameServer.getPlayer = function (sessionId) {
+  return GameServer.players[GameServer.sessionMap[sessionId]];
 };
 
 // Create a map between the numerical id's and the string id's of elements of a collection
@@ -116,7 +96,6 @@ GameServer.readMap = async function () {
   AOIutils.nbAOIhorizontal = Math.ceil(GameServer.map.width / tileWidth);
   AOIutils.lastAOIid = 0;
   GameServer.AOIs = {}; // Maps AOI id to AOI object
-  GameServer.dirtyAOIs = new Set(); // Set of AOI's whose update package have changes since last update
   GameServer.AOIfromTiles = new spaceMap(); // map tiles coordinates to AOI id (e.g. the tile (3,2) is in AOI 0)
   GameServer.collisionGrid = [];
   for (let y = 0; y < GameServer.map.height; y++) {
@@ -258,10 +237,10 @@ GameServer.loadPlayer = async function (sessionId, id, isConnected) {
   }
   try {
     const player = new Player();
-    player.setIDs(mongoId, sessionId);
+    player.setIDs(mongoId);
     player.getDataFromDb(document);
     GameServer.embedPlayer(player);
-    GameServer.addPlayerID(sessionId, player.id);
+    GameServer.sessionMap[sessionId] = player.id;
     return player;
   } catch (error) {
     await GameServer.characters.close(mongoId);
@@ -269,20 +248,9 @@ GameServer.loadPlayer = async function (sessionId, id, isConnected) {
   }
 };
 
-GameServer.createInitializationPacket = function (playerID) {
-    // Create the packet that the client will receive from the server in order to initialize the game
-  return {
-    player: GameServer.players[playerID].trim(), // info about the player
-    nbconnected: Object.keys(GameServer.players).length,
-    nbAOIhorizontal: AOIutils.nbAOIhorizontal, // info about AOI's
-    lastAOIid: AOIutils.lastAOIid,
-  };
-};
-
 GameServer.embedPlayer = function (player) {
     // Add the player to all the relevant data structures
   GameServer.players[player.id] = player;
-  GameServer.nbConnectedChanged = true;
   GameServer.addAtLocation(player);
   player.setLastSavedPosition();
 };
@@ -298,22 +266,10 @@ GameServer.removePlayer = async function (sessionId) {
   const player = GameServer.getPlayer(sessionId);
   if (!player) return;
   GameServer.removeFromLocation(player);
-  player.setProperty('connected', false);
   player.die();
-  const AOIs = player.listAdjacentAOIs(true);
-  AOIs.forEach((aoi) => {
-    GameServer.addDisconnectToAOI(aoi, player.id);
-  });
   delete GameServer.players[player.id];
-  GameServer.nbConnectedChanged = true;
-  GameServer.deleteSession(sessionId);
+  delete GameServer.sessionMap[sessionId];
   await GameServer.characters.close(player.getMongoID());
-  delete GameServer.IDmap[player.id];
-};
-
-GameServer.revivePlayer = function (playerID) {
-  const player = GameServer.players[playerID];
-  if (player) player.revive();
 };
 
 // ==================================
@@ -339,7 +295,7 @@ GameServer.addAtLocation = function (entity) {
   const map = GameServer.getSpaceMap(entity);
   map.add(entity.x, entity.y, entity);
   const area = GameServer.AOIfromTiles.getFirst(entity.x, entity.y);
-  area.addEntity(entity, null);
+  area.addEntity(entity);
   entity.inWorld = true;
   GameServer.changedEntities.add(entity);
   GameServer.changedAreas.add(area.id);
@@ -356,18 +312,8 @@ GameServer.moveAtLocation = function (entity, fromX, fromY, toX, toY) {
     GameServer.changedAreas.add(AOIfrom.id);
     GameServer.changedAreas.add(AOIto.id);
     entity.setProperty('aoi', AOIto.id);
-    const previousAOI = AOIfrom.id;
-    if (entity.category === 'player') {
-      // Receivers left behind need the new AOI to remove this avatar.
-      const nearby = AOIutils.listAdjacentAOIs(AOIto.id);
-      for (const id of AOIutils.listAdjacentAOIs(previousAOI)) {
-        if (GameServer.AOIs[id] && !nearby.includes(id)) {
-          GameServer.updateAOIproperty(id, entity.category, entity.id, 'aoi', AOIto.id);
-        }
-      }
-    }
     AOIfrom.deleteEntity(entity);
-    AOIto.addEntity(entity, previousAOI);
+    AOIto.addEntity(entity);
   }
 };
 
@@ -631,78 +577,6 @@ GameServer.regenerate = function () {
   });
 };
 
-GameServer.updatePlayers = function (sendUpdate) { // Function responsible for setting up and sending update packets to clients
-  Object.keys(GameServer.players).forEach((key) => {
-    const player = GameServer.players[key];
-    const localPkg = player.getIndividualUpdatePackage(); // the local pkg is player-specific
-    const globalPkg = GameServer.AOIs[player.aoi].getUpdatePacket(); // the global pkg is AOI-specific
-    let individualGlobalPkg = Object.assign(new UpdatePacket(), structuredClone(globalPkg));
-        // player.newAOIs is the list of AOIs about which the player hasn't checked for updates yet
-    for (let i = 0; i < player.newAOIs.length; i++) {
-      individualGlobalPkg.synchronize(GameServer.AOIs[player.newAOIs[i]]); // fetch updates from the new AOIs
-    }
-    individualGlobalPkg.removeEcho(player.id); // remove redundant information from multiple update sources
-    if (individualGlobalPkg.isEmpty()) individualGlobalPkg = null;
-    if (individualGlobalPkg === null && localPkg === null && !GameServer.nbConnectedChanged) return;
-    const finalPackage = {};
-    if (individualGlobalPkg) finalPackage.global = individualGlobalPkg.clean();
-    if (localPkg) finalPackage.local = localPkg.clean();
-    if (GameServer.nbConnectedChanged) finalPackage.nbconnected = Object.keys(GameServer.players).length;
-    sendUpdate(player.sessionId, finalPackage);
-    player.newAOIs = [];
-  });
-  GameServer.nbConnectedChanged = false;
-  GameServer.clearAOIs(); // erase the update content of all AOIs that had any
-};
-
-// =================================
-// Code related to AOI management
-
-GameServer.clearAOIs = function () {
-  GameServer.dirtyAOIs.forEach((aoi) => {
-    GameServer.AOIs[aoi].clear();
-  });
-  GameServer.dirtyAOIs.clear();
-};
-
-GameServer.handleAOItransition = function (entity, previous) {
-    // When a player moves from one AOI to another, identify which AOIs should be notified and update them
-  let AOIs = entity.listAdjacentAOIs(true);
-  if (previous !== null) {
-    const previousAOIs = AOIutils.listAdjacentAOIs(previous);
-        // Array_A.diff(Array_B) returns the elements in A that are not in B
-        // This is used because only the AOIs that are now adjacent, but were not before, need an update. Those who where already adjacent are up-to-date
-    AOIs = AOIs.diff(previousAOIs);
-  }
-  AOIs.forEach((aoi) => {
-    if (entity.constructor.name == 'Player') entity.newAOIs.push(aoi); // list the new AOIs in the neighborhood, from which to pull updates
-    GameServer.addObjectToAOI(aoi, entity);
-  });
-};
-
-GameServer.addObjectToAOI = function (aoi, entity) {
-  GameServer.AOIs[aoi].updatePacket.addObject(entity);
-  GameServer.dirtyAOIs.add(aoi);
-};
-
-GameServer.updateAOIproperty = function (aoi, category, id, property, value) {
-  GameServer.AOIs[aoi].updatePacket.updateProperty(category, id, property, value);
-  GameServer.dirtyAOIs.add(aoi);
-};
-
-GameServer.updateAOIroute = function (aoi, category, id, route) {
-  GameServer.AOIs[aoi].updatePacket.updateRoute(category, id, route);
-  GameServer.dirtyAOIs.add(aoi);
-};
-
-GameServer.addDisconnectToAOI = function (aoi, playerID) {
-  GameServer.AOIs[aoi].updatePacket.addDisconnect(playerID);
-  GameServer.dirtyAOIs.add(aoi);
-};
-
-// =============================
-// Miscellaneous
-
 function randomInt(low, high) {
   return Math.floor(Math.random() * (high - low) + low);
 }
@@ -710,7 +584,3 @@ function randomInt(low, high) {
 function manhattanDistance(xA, yA, xB, yB) {
   return Math.abs(xA - xB) + Math.abs(yA - yB);
 }
-
-Array.prototype.diff = function (a) { // returns the elements in the array that are not in array a
-  return this.filter(i => a.indexOf(i) < 0);
-};

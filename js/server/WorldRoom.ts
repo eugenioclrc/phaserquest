@@ -1,17 +1,19 @@
 import { Room, type Client } from 'colyseus';
 import { StateView } from '@colyseus/schema';
 import { AOIutils } from '../../shared/AOIutils.ts';
-import { CharacterJoinError, type PathCommand, type Tile } from '../../shared/WorldProtocol.ts';
-import type { PersonalUpdate, WorldUpdate } from '../../src/phaser4/protocol.ts';
-import { SelfState, WorldState, syncPlayer, type PlayerEntity, type PlayerState } from './WorldState.ts';
+import { CharacterJoinError, type PathCommand, type PlayerEvents, type Tile } from '../../shared/WorldProtocol.ts';
+import {
+  SelfState, WorldState, entityCollection, syncEntity,
+  type PlayerEntity, type VisibleEntity, type WorldEntity,
+} from './WorldState.ts';
 
 const { GameServer } = require('./GameServer.js');
 
 type Session = {
   id: unknown;
-  player?: Promise<(PlayerEntity & { newAOIs: number[] }) | null>;
+  player?: Promise<PlayerEntity | null>;
   view: StateView;
-  seen: Set<PlayerState>;
+  seen: Set<VisibleEntity>;
   area?: number;
   ready: boolean;
   stamp: number;
@@ -27,12 +29,16 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   private sessions = new Map<string, Session>();
 
   onCreate() {
-    this.state.aoiColumns = AOIutils.nbAOIhorizontal;
-    this.state.aoiCount = AOIutils.lastAOIid;
     this.setTimestep(GameServer.update, GameServer.updateRate);
     this.clock.setInterval(GameServer.regenerate, GameServer.regenRate);
     GameServer.schedule = (callback: (...args: any[]) => void, delay: number, ...args: any[]) =>
       this.clock.setTimeout(callback, delay, ...args);
+    this.clock.setInterval(() => {
+      for (const client of this.clients) {
+        const session = this.sessions.get(client.sessionId);
+        if (session?.ready) client.send('ping', session.stamp = Date.now());
+      }
+    }, 5000);
   }
 
   onJoin(client: Client, options: { id?: unknown }) {
@@ -62,35 +68,27 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   }
 
   onBeforePatch() {
-    this.syncPlayers();
-    GameServer.updatePlayers((sessionId: string, update: {
-      global?: WorldUpdate;
-      local?: PersonalUpdate & { teleport?: Tile };
-    }) => {
-      const session = this.sessions.get(sessionId);
+    this.syncWorld();
+    for (const [sessionId, session] of this.sessions) {
+      const player = GameServer.getPlayer(sessionId);
+      const update: (PlayerEvents & Partial<Tile> & { teleport?: Tile }) | undefined = player?.getIndividualUpdatePackage()?.clean();
+      if (!session.ready || !update) continue;
       const client = this.clients.getById(sessionId);
-      if (!session?.ready || !client) return;
-      if (update.global) {
-        const { players, newplayers, disconnected, ...entities } = update.global;
-        if (Object.keys(entities).length) client.send('update', entities, { afterNextPatch: true });
-      }
-      if (update.local) {
-        const { x, y, life, teleport, ...playerEvents } = update.local;
-        if (teleport) client.send('reset', teleport, { afterNextPatch: true });
-        if (x !== undefined && y !== undefined) client.send('revived', { x, y }, { afterNextPatch: true });
-        if (Object.keys(playerEvents).length) client.send('playerEvents', playerEvents, { afterNextPatch: true });
-      }
-    });
+      if (!client) continue;
+      const { x, y, teleport, ...events } = update;
+      if (teleport) client.send('reset', teleport, { afterNextPatch: true });
+      if (x !== undefined && y !== undefined) client.send('revived', { x, y }, { afterNextPatch: true });
+      if (Object.keys(events).length) client.send('playerEvents', events, { afterNextPatch: true });
+    }
   }
 
-  private syncPlayers() {
-    const dirty = GameServer.changedEntities as Set<{ category: string; inWorld: boolean; id: number }>;
+  private syncWorld() {
+    const dirty = GameServer.changedEntities as Set<WorldEntity>;
     const changedAreas = GameServer.changedAreas as Set<number>;
-    const removed = [];
+    const removed: WorldEntity[] = [];
     for (const entity of dirty) {
-      if (entity.category !== 'player') continue;
-      if (entity.inWorld) syncPlayer(this.state, entity as PlayerEntity);
-      else removed.push(String(entity.id));
+      if (entity.inWorld) syncEntity(this.state, entity);
+      else removed.push(entity);
     }
 
     let online = 0;
@@ -99,22 +97,23 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       if (!player) continue;
       if (session.ready) online++;
       let self = this.state.self.get(sessionId);
+      const door = player.lastDoor;
       if (!self) {
         self = new SelfState().assign({ playerId: player.id, life: player.life });
         this.state.self.set(sessionId, self);
         session.view.add(self);
-      } else {
-        self.life = player.life;
       }
+      self.life = player.life;
+      self.doorX = door?.x ?? -1;
+      self.doorY = door?.y ?? -1;
 
       const nearby = AOIutils.listAdjacentAOIs(player.aoi);
       if (session.area === player.aoi && !nearby.some(id => changedAreas.has(id))) continue;
       session.area = player.aoi;
-      const seen = new Set<PlayerState>();
+      const seen = new Set<VisibleEntity>();
       for (const id of nearby) {
-        for (const entity of GameServer.AOIs[id].entities) {
-          if (entity.category !== 'player') continue;
-          const row = this.state.players.get(String(entity.id));
+        for (const entity of GameServer.AOIs[id].entities as WorldEntity[]) {
+          const row = this.state[entityCollection[entity.category]].get(String(entity.id));
           if (row) seen.add(row);
         }
       }
@@ -123,7 +122,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       session.seen = seen;
     }
     this.state.online = online;
-    for (const key of removed) this.state.players.delete(key);
+    for (const entity of removed) this.state[entityCollection[entity.category]].delete(String(entity.id));
     dirty.clear();
     changedAreas.clear();
   }
@@ -137,9 +136,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         session.player ??= GameServer.loadPlayer(sessionId, session.id, () => this.sessions.has(sessionId));
         const player = await session.player;
         if (!player || session.ready || this.clients.getById(sessionId) !== client) return;
-        player.newAOIs = AOIutils.listAdjacentAOIs(player.aoi);
         session.ready = true;
-        client.send('ping', session.stamp = Date.now());
+        const { x, y } = player;
+        client.send('ready', { x, y, stamp: session.stamp = Date.now() });
       } catch (error) {
         const code = (error as { code?: keyof typeof CharacterJoinError }).code;
         client.send('entryError', (code && CharacterJoinError[code]) || CharacterJoinError.unavailable);
@@ -153,7 +152,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       }
     },
     revive: (client: Client) => {
-      if (this.sessions.get(client.sessionId)?.ready) GameServer.revivePlayer(GameServer.getPlayerID(client.sessionId));
+      if (this.sessions.get(client.sessionId)?.ready) GameServer.getPlayer(client.sessionId)?.revive();
     },
     chat: (client: Client, txt: string) => {
       if (!this.sessions.get(client.sessionId)?.ready || typeof txt !== 'string' || !txt.trim() || txt.length > 300) return;

@@ -93,9 +93,9 @@ function setStatus(message: string) {
 }
 
 const connection = createConnection({
-  enter(player, nbAOIhorizontal, lastAOIid) {
+  enter(player, door) {
     playerId = player.id;
-    world.enter(player, nbAOIhorizontal, lastAOIid);
+    world.enter(player, door);
     characterForm.hidden = true;
     gameHud.hidden = false;
     achievements.render();

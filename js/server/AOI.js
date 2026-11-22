@@ -2,8 +2,6 @@
  * Created by Jerome on 24-02-17.
  */
 
-const GameServer = require('./GameServer.js').GameServer;
-const UpdatePacket = require('./UpdatePacket.js');
 const { AOIutils } = require('../../shared/AOIutils.ts');
 
 class AOI {
@@ -14,20 +12,10 @@ class AOI {
     this.width = w;
     this.height = h;
     this.entities = []; // list of entities situated within the area corresponding to this AOI
-    this.updatePacket = new UpdatePacket();
   }
 
-  getUpdatePacket() {
-    return (this.updatePacket ? this.updatePacket : null);
-  }
-
-  clear() {
-    this.updatePacket = new UpdatePacket();
-  }
-
-  addEntity(entity, previous) {
+  addEntity(entity) {
     this.entities.push(entity);
-    GameServer.handleAOItransition(entity, previous);
   }
 
   deleteEntity(entity) {

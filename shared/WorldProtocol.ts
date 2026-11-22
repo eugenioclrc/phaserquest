@@ -1,3 +1,5 @@
+export const playerStepMs = 120;
+
 export interface Tile {
   x: number;
   y: number;
@@ -16,3 +18,10 @@ export const CharacterJoinError = {
   busy: 4409,
   unavailable: 4503,
 } as const;
+
+export interface PlayerEvents {
+  hp?: { hp: number; target: boolean; monsterId?: number }[];
+  killed?: number[];
+  used?: number[];
+  noPick?: boolean;
+}

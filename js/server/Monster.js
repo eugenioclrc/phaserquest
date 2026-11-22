@@ -32,17 +32,6 @@ class Monster extends MovingEntity {
     this.lastPositionCheck = Date.now();
   }
 
-  trim() {
-    const trimmed = {};
-    const broadcastProperties = ['id', 'x', 'y', 'monster', 'inFight', 'alive'];
-    for (let p = 0; p < broadcastProperties.length; p++) {
-      trimmed[broadcastProperties[p]] = this[broadcastProperties[p]];
-    }
-    if (this.route) trimmed.route = this.route.trim(this.category);
-    if (this.target) trimmed.targetID = this.target.id;
-    return trimmed;
-  }
-
   respawn() {
     this.respawnAt(this.startX, this.startY);
     if (this.chestArea) this.chestArea.increment();

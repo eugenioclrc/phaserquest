@@ -2,9 +2,9 @@
 
 ## Project Structure and Module Organization
 
-- `index.html` loads the Phaser 4 client from `src/phaser4/`. `main.ts` connects the browser controls and game scene, and `connection.ts` handles Socket.IO events.
-- `server.js` starts Express, Socket.IO, and MongoDB. `js/server/GameServer.js` runs the world simulation and persists characters. Server entities and update packets also live in `js/server/`.
-- `shared/` contains the binary protocol schemas, area-of-interest helpers, and spatial map used by both client and server.
+- `index.html` loads the Phaser 4 client from `src/phaser4/`. `main.ts` connects the browser controls and game scene, and `connection.ts` binds Colyseus room messages and state callbacks.
+- `server.js` starts Express, Colyseus and MongoDB. `js/server/GameServer.js` runs the simulation, `WorldRoom.ts` owns the room and `CharacterStore.js` owns MongoDB saves.
+- `shared/` contains game commands, area-of-interest helpers and the spatial map. Replicated Schema definitions live in `js/server/WorldState.ts`.
 - `assets/` holds maps, entity definitions, sprite atlases, tilesets, audio, and fonts. Keep generated `dist/` output out of commits.
 
 ## Build and Development Commands
@@ -25,7 +25,7 @@ Use two-space indentation, single quotes, and semicolons. Use camelCase for func
 
 ## Testing Guidelines
 
-Run `bun test` to verify that the client decodes a world update encoded by the server using the schemas in `shared/CoDec.ts`. Run `bun run typecheck` for TypeScript changes. Run `bun run build` and play the affected flow in a browser. For a basic smoke test, create a character, click to move, then reload and rejoin with that character. For multiplayer edits, use two separate browser profiles.
+Run `bun test` to verify character persistence, world commands, room lifecycle and filtered state over local WebSockets. Run `bun run typecheck` for TypeScript changes. Run `bun run build` and play the affected flow in a browser. For a basic smoke test, create a character, click to move, then reload and rejoin with that character. For multiplayer edits, use two separate browser profiles.
 
 ## Commits and Pull Requests
 

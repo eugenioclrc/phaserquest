@@ -1,4 +1,4 @@
-import type { Tile } from '../../shared/WorldProtocol.ts';
+import type { PlayerEvents, Tile } from '../../shared/WorldProtocol.ts';
 export type { PathAction, Tile } from '../../shared/WorldProtocol.ts';
 
 export interface PlayerSnapshot extends Tile {
@@ -11,7 +11,7 @@ export interface PlayerSnapshot extends Tile {
   inFight?: boolean;
   targetID?: number;
   routeVersion?: number;
-  route?: { end: Tile; orientation?: number; delta?: number };
+  route?: { end: Tile; orientation: number; elapsed: number };
 }
 
 export interface MonsterSnapshot extends Tile {
@@ -21,6 +21,7 @@ export interface MonsterSnapshot extends Tile {
   inFight?: boolean;
   targetID?: number;
   lastHitter?: number;
+  routeVersion?: number;
   route?: { path: Tile[]; delta: number };
 }
 
@@ -35,21 +36,19 @@ export interface ItemSnapshot extends Tile {
 }
 
 export interface WorldUpdate {
-  newplayers?: PlayerSnapshot[];
+  newPlayers?: PlayerSnapshot[];
   players?: Record<number, Partial<PlayerSnapshot>>;
-  newmonsters?: MonsterSnapshot[];
+  newMonsters?: MonsterSnapshot[];
   monsters?: Record<number, Partial<MonsterSnapshot>>;
-  newitems?: ItemSnapshot[];
+  newItems?: ItemSnapshot[];
   items?: Record<number, Partial<ItemSnapshot>>;
-  disconnected?: number[];
+  removedPlayers?: number[];
+  removedMonsters?: number[];
+  removedItems?: number[];
 }
 
-export interface PersonalUpdate {
+export interface PersonalUpdate extends PlayerEvents {
   x?: number;
   y?: number;
   life?: number;
-  hp?: { hp: number; target: boolean; from?: number }[];
-  killed?: number[];
-  used?: number[];
-  noPick?: boolean;
 }

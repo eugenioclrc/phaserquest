@@ -2,7 +2,7 @@
 
 Phaser Quest is a reproduction of Mozilla's [Browserquest](http://browserquest.mozilla.org/) using the following tools:
 - [Phaser 4](https://phaser.io/) for the client
-- [Socket.IO](https://socket.io/) and [Bun](https://bun.sh/) for the server and client-server communication
+- [Colyseus](https://colyseus.io/framework/) and [Bun](https://bun.sh/) for the server and client-server communication
 
 ## Run locally
 
@@ -15,7 +15,7 @@ bun run dev
 
 Open [http://127.0.0.1:8081](http://127.0.0.1:8081). Vite reloads the browser when client code changes, and Bun restarts the game server when server code changes. Both use the same port.
 
-Create or load a character to explore the map and chat with nearby players. Existing character saves still work, and bookmarks to `/phaser4.html` redirect to `/`. Run `bun run typecheck` to check the TypeScript modules and `bun test` to verify the binary protocol.
+Create or load a character to explore the map and chat with nearby players. Existing character saves still work, and bookmarks to `/phaser4.html` redirect to `/`. Run `bun run typecheck` to check the TypeScript modules and `bun test` to verify room lifecycle, commands, character persistence and visibility. The room tests use local ephemeral ports.
 
 MongoDB defaults to `mongodb://127.0.0.1:27017` and the `phaserQuest` database. Set `MONGODB_URI` or `MONGODB_DB` to change those settings. Set `PORT` to change the HTTP port and `HOST` to change the bind address. Development binds to `127.0.0.1` by default. The existing `-p` and `--mongoPort` options also work, for example `bun run dev -p 8082 --mongoPort 27018`.
 
@@ -26,13 +26,17 @@ bun run build
 bun run start
 ```
 
-The build writes the browser bundle to `dist/`. The game server serves the bundle and the game assets alongside Socket.IO. Keep `dist/`, `assets/`, `shared/`, and the server code together when deploying. After building, runtime dependencies can be installed with `bun install --frozen-lockfile --production`.
+The build writes the browser bundle to `dist/`. The game server serves the bundle and the game assets alongside the Colyseus WebSocket endpoint. Keep `dist/`, `assets/`, `shared/`, and the server code together when deploying. After building, runtime dependencies can be installed with `bun install --frozen-lockfile --production`.
 
 ## Code layout
 
 - `index.html` loads the Phaser 4 client from `src/phaser4/`. `WorldScene.ts` handles gameplay rendering and input, `main.ts` connects the browser controls, and `connection.ts` exchanges updates with the server.
-- `src/Decoder.ts` decodes server updates using the schemas in `shared/CoDec.ts`.
-- `server.js` starts HTTP, Socket.IO, and MongoDB. `js/server/GameServer.js` runs the world simulation and persists characters.
+- `server.js` starts HTTP, MongoDB and one persistent Colyseus room named `world`.
+- `js/server/GameServer.js` runs the simulation. `js/server/WorldRoom.ts` manages sessions and uses `js/server/WorldState.ts` to synchronize nearby entities and each player's own health. `js/server/CharacterStore.js` reads and writes MongoDB saves.
+
+## Deploy or roll back
+
+Deploy the server and browser build from the same revision. Run one game server against the character database at a time. To roll back, stop the running server and start the previous server with its matching browser build and the same MongoDB collection. Both versions read the existing player documents.
 
 ## Further documentation
 

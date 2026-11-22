@@ -13,8 +13,6 @@ class PersonalUpdatePacket {
   }
 
   isEmpty() {
-    // current value of the health of the player
-    if (this.life !== undefined) return false;
     if (this.x !== undefined) return false;
     if (this.y !== undefined) return false;
     if (this.teleport !== undefined) return false;
@@ -39,13 +37,8 @@ class PersonalUpdatePacket {
     this.y = y;
   }
 
-  updateLife(life) {
-    this.life = life;
-  }
-
-  addHP(target, hp, from) {
-    // target (boolean) ; hp : int ; from : id (int)
-    this.hp.push({ target, hp, from });
+  addHP(target, hp, monsterId) {
+    this.hp.push({ target, hp, monsterId });
   }
 
   addKilled(id) {

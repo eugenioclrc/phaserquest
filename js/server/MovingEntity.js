@@ -23,20 +23,9 @@ class MovingEntity extends GameObject {
 
 
   setRoute(path, departureTime, latency, action, orientation) {
-    this.route = new Route(this, path, departureTime, latency, action, orientation);
+    this.route = new Route(path, departureTime, latency, action, orientation);
     this.routeVersion++;
     if (this.inWorld) GameServer.changedEntities.add(this);
-    this.updateAOIRoutes();
-  }
-
-  updateAOIRoutes() {
-    const AOIs = this.listAdjacentAOIs(true);
-    const category = this.category;
-    const id = this.id;
-    const route = this.route;
-    AOIs.forEach((aoi) => {
-      GameServer.updateAOIroute(aoi, category, id, route.trim(category));
-    });
   }
 
   setTarget(target) {
@@ -68,7 +57,6 @@ class MovingEntity extends GameObject {
         GameServer.checkItem(this);
         GameServer.checkAction(this);
         GameServer.checkSave(this);
-        console.log(`${this.name} moved to ${this.x}, ${this.y}`);
       }
       this.clearRoute();
     }
@@ -108,9 +96,9 @@ class MovingEntity extends GameObject {
     damage = (damage <= 0 ? randomInt(1, 3) : damage);
     this.target.lastHitter = this;
     const target = this.target;
-    const difference = Math.abs(this.target.updateLife(-damage)); // Avoid sending negative numbers for binary protocol
+    const difference = Math.abs(target.updateLife(-damage));
     if (this.constructor.name == 'Player') {
-      this.updatePacket.addHP(true, difference); // true = target
+      this.updatePacket.addHP(true, difference, target.id);
       if (!target.alive) GameServer.handleKill(this, target);
     } else if (this.constructor.name == 'Monster') {
       target.updatePacket.addHP(false, difference, this.id); // false = self
@@ -127,7 +115,6 @@ class MovingEntity extends GameObject {
       this.life = this.maxLife;
     }
     const difference = this.life - tmp;
-    if (this.constructor.name == 'Player') this.updatePacket.updateLife(this.life);
     return difference;
   }
 
@@ -151,8 +138,6 @@ class MovingEntity extends GameObject {
     this.y = y;
     this.life = this.maxLife;
     GameServer.moveAtLocation(this, previousX, previousY, x, y);
-    this.updateAOIs('x', x);
-    this.updateAOIs('y', y);
     this.setProperty('alive', true);
   }
 

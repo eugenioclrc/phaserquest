@@ -1,20 +1,37 @@
 import { Callbacks, Client, type Room } from '@colyseus/sdk';
 import { CharacterJoinError } from '../../shared/WorldProtocol.ts';
-import type { PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
+import type { ItemSnapshot, MonsterSnapshot, PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
 
 import type { WorldRoom } from '../../js/server/WorldRoom.ts';
-import type { PlayerState } from '../../js/server/WorldState.ts';
+import type { ItemState, MonsterState, PlayerState } from '../../js/server/WorldState.ts';
 
-function playerSnapshot(row: PlayerState): PlayerSnapshot {
-  const { id, name, x, y, aoi, armor, weapon, alive, inFight, targetID, routeVersion, route } = row;
+function playerSnapshot(row: PlayerState, serverNow: number): PlayerSnapshot {
+  const { id, name, x, y, aoi, armor, weapon, alive, inFight, targetID, routeVersion } = row;
   return {
     id, name, x, y, aoi, armor, weapon, alive, inFight, targetID, routeVersion,
-    route: route && { end: { x: route.end.x, y: route.end.y }, orientation: route.orientation, delta: route.delta },
+    route: row.routeOrientation ? {
+      end: { x: row.routeEndX, y: row.routeEndY },
+      orientation: row.routeOrientation,
+      elapsed: Math.max(0, (serverNow - row.routeStartedAt) | 0),
+    } : undefined,
   };
 }
 
+function monsterSnapshot(row: MonsterState): MonsterSnapshot {
+  const { id, x, y, monster, alive, inFight, targetID, lastHitter, routeVersion, route } = row;
+  return {
+    id, x, y, monster, alive, inFight, targetID, lastHitter, routeVersion,
+    route: route && { path: Array.from(route.path, tile => ({ x: tile.x, y: tile.y })), delta: route.delta },
+  };
+}
+
+function itemSnapshot(row: ItemState): ItemSnapshot {
+  const { id, x, y, itemID, visible, respawn, chest, inChest, loot } = row;
+  return { id, x, y, itemID, visible, respawn, chest, inChest, loot };
+}
+
 type ConnectionEvents = {
-  enter(player: PlayerSnapshot, nbAOIhorizontal: number, lastAOIid: number): void;
+  enter(player: PlayerSnapshot, door?: Tile): void;
   updateWorld(update: WorldUpdate): void;
   updateSelf(update: PersonalUpdate): void;
   reset(tile: Tile): void;
@@ -88,48 +105,79 @@ export function createConnection(events: ConnectionEvents) {
   async function join(id: string, resume = true) {
     const key = 'worldReconnection:' + id;
     try {
-      let next: Room<WorldRoom> | undefined;
+      let resumed: Room<WorldRoom> | undefined;
       if (resume) {
         const token = sessionStorage.getItem(key);
         if (token) {
           try {
-            next = await sdk.reconnect<WorldRoom>(token);
+            resumed = await sdk.reconnect<WorldRoom>(token);
           } catch {
             sessionStorage.removeItem(key);
           }
         }
       }
-      next ??= await sdk.join<WorldRoom>('world', { id });
+      const next = resumed ?? await sdk.join<WorldRoom>('world', { id });
       room = next;
       next.reconnection.minUptime = 0;
       next.reconnection.maxEnqueuedMessages = 0;
       let dropped = false;
+      let lastServerOffset = 0;
+      let heroPosition: Tile | undefined;
+      const snapshot = (player: PlayerState) => playerSnapshot(player, Date.now() + lastServerOffset);
 
       let worldUpdate: WorldUpdate = {};
       const callbacks = Callbacks.get(next);
-      const unbindPlayer = new Map<string, () => void>();
+      const unbind = new Map<string, () => void>();
       callbacks.onAdd('players', (player, key) => {
-        (worldUpdate.newplayers ??= []).push(playerSnapshot(player));
-        unbindPlayer.set(key, callbacks.onChange(player, () => {
-          (worldUpdate.players ??= {})[player.id] = playerSnapshot(player);
+        (worldUpdate.newPlayers ??= []).push(snapshot(player));
+        unbind.set('p' + key, callbacks.onChange(player, () => {
+          (worldUpdate.players ??= {})[player.id] = snapshot(player);
         }));
       });
       callbacks.onRemove('players', (player, key) => {
-        unbindPlayer.get(key)?.();
-        unbindPlayer.delete(key);
-        (worldUpdate.disconnected ??= []).push(player.id);
+        unbind.get('p' + key)?.();
+        unbind.delete('p' + key);
+        (worldUpdate.removedPlayers ??= []).push(player.id);
+      });
+
+      callbacks.onAdd('monsters', (monster, key) => {
+        (worldUpdate.newMonsters ??= []).push(monsterSnapshot(monster));
+        unbind.set('m' + key, callbacks.onChange(monster, () => {
+          (worldUpdate.monsters ??= {})[monster.id] = monsterSnapshot(monster);
+        }));
+      });
+      callbacks.onRemove('monsters', (monster, key) => {
+        unbind.get('m' + key)?.();
+        unbind.delete('m' + key);
+        (worldUpdate.removedMonsters ??= []).push(monster.id);
+      });
+      callbacks.onAdd('items', (item, key) => {
+        (worldUpdate.newItems ??= []).push(itemSnapshot(item));
+        unbind.set('i' + key, callbacks.onChange(item, () => {
+          (worldUpdate.items ??= {})[item.id] = itemSnapshot(item);
+        }));
+      });
+      callbacks.onRemove('items', (item, key) => {
+        unbind.get('i' + key)?.();
+        unbind.delete('i' + key);
+        (worldUpdate.removedItems ??= []).push(item.id);
       });
 
       function flush() {
-        if (room !== next || dropped || !next?.state) return;
+        if (room !== next || dropped || !next.state) return;
         const state = next.state;
         const self = state.self?.get(next.sessionId);
         if (!self) return;
         if (!entered) {
           const player = state.players?.get(String(self.playerId));
-          if (!player) return;
-          events.enter(playerSnapshot(player), state.aoiColumns, state.aoiCount);
-          worldUpdate = { newplayers: Array.from(state.players.values(), playerSnapshot) };
+          if (!player || !heroPosition) return;
+          const door = self.doorX >= 0 && self.doorY >= 0 ? { x: self.doorX, y: self.doorY } : undefined;
+          events.enter({ ...snapshot(player), ...heroPosition }, door);
+          worldUpdate = {
+            newPlayers: Array.from(state.players.values(), snapshot),
+            newMonsters: Array.from(state.monsters.values(), monsterSnapshot),
+            newItems: Array.from(state.items.values(), itemSnapshot),
+          };
           entered = true;
         }
         events.updateWorld(worldUpdate);
@@ -139,8 +187,9 @@ export function createConnection(events: ConnectionEvents) {
       }
 
       function ready() {
-        sessionStorage.setItem(key, next!.reconnectionToken);
-        next!.send('ready');
+        heroPosition = undefined;
+        sessionStorage.setItem(key, next.reconnectionToken);
+        next.send('ready');
         flush();
       }
 
@@ -155,6 +204,8 @@ export function createConnection(events: ConnectionEvents) {
         ready();
       });
       next.onLeave(() => {
+        for (const dispose of unbind.values()) dispose();
+        unbind.clear();
         if (room !== next) return;
         room = undefined;
         entered = false;
@@ -173,14 +224,22 @@ export function createConnection(events: ConnectionEvents) {
         sessionStorage.removeItem(key);
         if (code === CharacterJoinError.missing) clearCharacter(id);
         events.error(characterMessage(code));
-        void next!.leave();
+        void next.leave();
       });
-      next.onMessage('ping', (stamp: number) => next!.send('ponq', stamp));
-      next.onMessage('update', (update: WorldUpdate) => { if (entered) events.updateWorld(update); });
-      next.onMessage('revived', (tile: Tile) => { if (entered) events.updateSelf(tile); });
-      next.onMessage('playerEvents', (update: PersonalUpdate) => { if (entered) events.updateSelf(update); });
-      next.onMessage('reset', (tile: Tile | null) => { if (entered && tile) events.reset(tile); });
-      next.onMessage('chat', ({ id: sender, txt }: { id: number; txt: string }) => { if (entered) events.say(sender, txt); });
+      function pong(stamp: number) {
+        lastServerOffset = stamp - Date.now();
+        next.send('ponq', stamp);
+      }
+      next.onMessage('ready', ({ x, y, stamp }: Tile & { stamp: number }) => {
+        heroPosition = { x, y };
+        pong(stamp);
+        flush();
+      });
+      next.onMessage('ping', pong);
+      next.onMessage('revived', (tile: Tile) => { if (room === next && entered) events.updateSelf(tile); });
+      next.onMessage('playerEvents', (update: PersonalUpdate) => { if (room === next && entered) events.updateSelf(update); });
+      next.onMessage('reset', (tile: Tile | null) => { if (room === next && entered && tile) events.reset(tile); });
+      next.onMessage('chat', ({ id: sender, txt }: { id: number; txt: string }) => { if (room === next && entered) events.say(sender, txt); });
       ready();
     } catch (error) {
       const code = (error as { code?: number }).code;

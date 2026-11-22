@@ -24,15 +24,6 @@ class Item extends GameObject {
   }
 
 
-  trim() {
-    const trimmed = {};
-    const broadcastProperties = ['id', 'x', 'y', 'itemID', 'visible', 'respawn', 'chest', 'inChest', 'loot'];
-    for (let p = 0; p < broadcastProperties.length; p++) {
-      trimmed[broadcastProperties[p]] = this[broadcastProperties[p]];
-    }
-    return trimmed;
-  }
-
   pick() {
     if (!this.visible) return;
     this.setProperty('visible', false);

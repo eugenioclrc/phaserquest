@@ -1,6 +1,6 @@
+import { playerStepMs } from '../../shared/WorldProtocol.ts';
 import * as Phaser from 'phaser';
 import EasyStar from 'easystarjs';
-import { AOIutils } from '../../shared/AOIutils.ts';
 import type { ItemSnapshot, PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
 import { MonsterView, type MonsterDefinition } from './MonsterView.ts';
 
@@ -47,7 +47,6 @@ type Avatar = Speaker & {
   alive: boolean;
   inFight?: boolean;
   targetID?: number;
-  aoi?: number;
   routeVersion?: number;
   motion?: Phaser.Tweens.Tween;
 };
@@ -193,16 +192,19 @@ export class WorldScene extends Phaser.Scene {
     this.onReady();
   }
 
-  enter(player: PlayerSnapshot, nbAOIhorizontal: number, lastAOIid: number) {
+  enter(player: PlayerSnapshot, doorSource?: Tile) {
     this.leave();
-    AOIutils.nbAOIhorizontal = nbAOIhorizontal;
-    AOIutils.lastAOIid = lastAOIid;
     this.heroId = player.id;
-    this.setHeroCamera(this.addAvatar(player));
+    const hero = this.addAvatar(player);
+    this.setHeroCamera(hero, doorSource && this.doors.get(tileKey(doorSource)));
+    if (hero.alive && player.route) {
+      const path = this.findPath(player, player.route.end);
+      if (path && path.length > 1) this.move(hero, path, player.route.orientation, player.route.elapsed % playerStepMs);
+    }
   }
 
   applyWorld(update: WorldUpdate) {
-    for (const item of update.newitems ?? []) {
+    for (const item of update.newItems ?? []) {
       let view = this.items.get(item.id);
       if (!view) {
         const sprite = this.add.image(0, 0, 'players', 'chest').setInteractive({ useHandCursor: true });
@@ -215,7 +217,7 @@ export class WorldScene extends Phaser.Scene {
       const view = this.items.get(Number(key));
       if (view) this.updateItem(view, changes);
     }
-    for (const snapshot of update.newmonsters ?? []) {
+    for (const snapshot of update.newMonsters ?? []) {
       const current = this.monsters.get(snapshot.id);
       const species = this.species.get(snapshot.monster);
       if (current) current.apply(snapshot, this.time.now);
@@ -233,7 +235,7 @@ export class WorldScene extends Phaser.Scene {
       }
       monster.apply(changes, this.time.now);
     }
-    for (const player of update.newplayers ?? []) {
+    for (const player of update.newPlayers ?? []) {
       if (player.id !== this.heroId) this.addAvatar(player);
     }
     for (const [key, changes] of Object.entries(update.players ?? {})) {
@@ -241,13 +243,14 @@ export class WorldScene extends Phaser.Scene {
       const avatar = this.avatars.get(id);
       if (avatar) this.updateAvatar(avatar, changes, id === this.heroId);
     }
-    for (const id of update.disconnected ?? []) this.removeAvatar(id);
-
-    const hero = this.heroId === undefined ? undefined : this.avatars.get(this.heroId);
-    if (hero?.aoi === undefined) return;
-    const nearby = AOIutils.listAdjacentAOIs(hero.aoi);
-    for (const view of this.items.values()) {
-      if (!nearby.includes(AOIutils.idFromCoords(view.data.x, view.data.y))) this.removeItem(view);
+    for (const id of update.removedPlayers ?? []) this.removeAvatar(id);
+    for (const id of update.removedMonsters ?? []) {
+      this.monsters.get(id)?.sprite.destroy();
+      this.monsters.delete(id);
+    }
+    for (const id of update.removedItems ?? []) {
+      const item = this.items.get(id);
+      if (item) this.removeItem(item);
     }
   }
 
@@ -268,10 +271,10 @@ export class WorldScene extends Phaser.Scene {
     if (!hero) return;
     for (const hit of update.hp ?? []) {
       const target = hit.target
-        ? (hero.targetID === undefined ? undefined : this.monsters.get(hero.targetID)?.sprite)
+        ? (hit.monsterId === undefined ? undefined : this.monsters.get(hit.monsterId)?.sprite)
         : hero.container;
       if (!target) continue;
-      const healing = !hit.target && hit.from === undefined;
+      const healing = !hit.target && hit.monsterId === undefined;
       if (!healing || hit.hp > 0) this.playSound(healing ? 'heal' : hit.target ? 'hit1' : 'hurt');
       const text = this.add.text(target.x + this.tileWidth / 2, target.y - 20, `${healing ? '+' : '−'}${hit.hp}`, {
         fontSize: '18px', color: healing ? '#79ea84' : '#ffac96', stroke: '#29160c', strokeThickness: 3,
@@ -495,7 +498,6 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private updateAvatar(avatar: Avatar, changes: Partial<PlayerSnapshot>, isHero: boolean) {
-    if (changes.aoi !== undefined) avatar.aoi = changes.aoi;
     if (changes.name !== undefined) avatar.name.setText(changes.name);
     const armor = changes.armor === undefined ? undefined : this.itemInfo(changes.armor);
     const weapon = changes.weapon === undefined ? undefined : this.itemInfo(changes.weapon);
@@ -531,7 +533,13 @@ export class WorldScene extends Phaser.Scene {
     if (!avatar.motion) this.showFrame(avatar, idleFrame[avatar.direction]);
     if (avatar.alive && changes.route && !isHero && changedRoute) {
       const path = this.findPath(this.tileAt(avatar), changes.route.end);
-      if (path && path.length > 1) this.move(avatar, path, changes.route.orientation, changes.route.delta);
+      if (path && path.length > 1) {
+        const progress = Math.min(path.length - 1, Math.floor(changes.route.elapsed / playerStepMs));
+        this.place(avatar, path[progress]);
+        if (progress < path.length - 1) {
+          this.move(avatar, path.slice(progress), changes.route.orientation, changes.route.elapsed % playerStepMs);
+        }
+      }
     }
   }
 
@@ -605,7 +613,7 @@ export class WorldScene extends Phaser.Scene {
       this.destination?.setPosition(end.x * this.tileWidth, end.y * this.tileHeight).setVisible(true);
     }
     avatar.motion = this.tweens.addCounter({
-      from: 0, to: path.length - 1, duration: Math.max(1, (path.length - 1) * 120 - latency),
+      from: 0, to: path.length - 1, duration: Math.max(1, (path.length - 1) * playerStepMs - latency),
       onUpdate: (tween) => {
         if (path.length === 1) return;
         const progress = tween.getValue() ?? 0;
