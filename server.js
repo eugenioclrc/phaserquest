@@ -126,8 +126,9 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('delete', (data) => {
-    gs.deletePlayer(data.id);
+  socket.on('delete', async (data, ack) => {
+    const ok = await gs.deletePlayer(data?.id);
+    if (typeof ack === 'function') ack({ ok });
   });
 
   socket.on('disconnect', () => {

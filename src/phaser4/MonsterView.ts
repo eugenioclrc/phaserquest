@@ -3,6 +3,8 @@ import type { MonsterSnapshot, Tile } from './protocol.ts';
 
 export type MonsterDefinition = {
   id: number;
+  name: string;
+  achievement?: number;
   speed: number;
   customAnchor?: Tile;
   frames: Record<string, number[] | number>;

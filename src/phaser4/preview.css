@@ -59,6 +59,7 @@ body {
 
 .character-form {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: .75rem;
   max-width: 26rem;
@@ -72,7 +73,7 @@ body {
 
 .character-field {
   display: grid;
-  flex: 1;
+  flex: 1 1 10rem;
   min-width: 0;
   gap: .3rem;
 }
@@ -155,6 +156,7 @@ button:disabled {
 
 .game-stats {
   display: flex;
+  flex-wrap: wrap;
   gap: .85rem;
   margin: 0;
 }
@@ -177,4 +179,44 @@ button:disabled {
   align-items: center;
   gap: .5rem;
   min-width: 0;
+}
+
+dialog {
+  max-width: min(26rem, calc(100% - 2rem));
+  color: var(--ink);
+  background: var(--parchment);
+  border: 2px solid var(--trim);
+}
+
+dialog::backdrop {
+  background: #170e09b3;
+}
+
+dialog h2, #reset-status:empty {
+  margin: 0;
+}
+
+.session-controls {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: .5rem;
+}
+
+.session-controls summary {
+  min-height: 44px;
+  padding: .45rem .75rem;
+  color: var(--gold);
+  border: 1px solid var(--trim);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.session-controls details[open] {
+  flex-basis: 100%;
+}
+
+.session-controls li + li {
+  margin-top: .35rem;
 }

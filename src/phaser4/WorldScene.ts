@@ -107,7 +107,8 @@ export class WorldScene extends Phaser.Scene {
     private readonly onPath: (path: Tile[], orientation: number, action?: PathAction) => boolean,
     private readonly onHeroAlive: (alive: boolean) => void,
     private readonly onHeroEquipment: (slot: 'armor' | 'weapon', key: string) => void,
-    private readonly onFirstDialogue?: () => void,
+    private readonly onFirstDialogue: () => void,
+    private readonly onOutdoorArrival: (tile: Tile) => void,
   ) {
     super('world');
   }
@@ -120,6 +121,7 @@ export class WorldScene extends Phaser.Scene {
     this.load.atlas('monsters', '/assets/sprites/atlas4.png', '/assets/sprites/atlas4.json');
     this.load.json('db', '/assets/json/db.json');
     this.load.json('entities', '/assets/json/entities_client.json');
+    this.load.audioSprite('sounds', '/assets/audio/sounds.json', ['/assets/audio/sounds.mp3', '/assets/audio/sounds.ogg']);
   }
 
   create() {
@@ -223,7 +225,12 @@ export class WorldScene extends Phaser.Scene {
       }
     }
     for (const [key, changes] of Object.entries(update.monsters ?? {})) {
-      this.monsters.get(Number(key))?.apply(changes, this.time.now);
+      const monster = this.monsters.get(Number(key));
+      if (!monster) continue;
+      if (monster.alive && changes.alive === false && this.cameras.main.worldView.contains(monster.sprite.x, monster.sprite.y)) {
+        this.playSound('kill2');
+      }
+      monster.apply(changes, this.time.now);
     }
     for (const player of update.newplayers ?? []) {
       if (player.id !== this.heroId) this.addAvatar(player);
@@ -250,6 +257,14 @@ export class WorldScene extends Phaser.Scene {
     return this.itemDefinitions.get(id);
   }
 
+  monsterInfo(id: number) {
+    return this.species.get(id)?.definition;
+  }
+
+  playSound(name: string) {
+    if (!this.sound.mute && !this.sound.locked && this.cache.audio.exists('sounds')) this.sound.playAudioSprite('sounds', name);
+  }
+
   applySelf(update: PersonalUpdate) {
     const hero = this.heroId === undefined ? undefined : this.avatars.get(this.heroId);
     if (!hero) return;
@@ -259,6 +274,7 @@ export class WorldScene extends Phaser.Scene {
         : hero.container;
       if (!target) continue;
       const healing = !hit.target && hit.from === undefined;
+      if (!healing || hit.hp > 0) this.playSound(healing ? 'heal' : hit.target ? 'hit1' : 'hurt');
       const text = this.add.text(target.x + this.tileWidth / 2, target.y - 20, `${healing ? '+' : '−'}${hit.hp}`, {
         fontSize: '18px', color: healing ? '#79ea84' : '#ffac96', stroke: '#29160c', strokeThickness: 3,
       }).setOrigin(0.5, 1).setDepth(100000);
@@ -308,6 +324,7 @@ export class WorldScene extends Phaser.Scene {
     const crossing = this.lastCrossing;
     // The server can reach the door before or after the local tween.
     if (confirmed) {
+      if (!confirmed.previous) this.onOutdoorArrival(confirmed.path[confirmed.path.length - 1]);
       this.lastCrossing = confirmed;
       this.setHeroCamera(hero, confirmed.door);
     } else if (crossing) {
@@ -369,6 +386,9 @@ export class WorldScene extends Phaser.Scene {
 
   private updateItem(view: ItemView, changes: Partial<ItemSnapshot>) {
     const { data, sprite } = view;
+    if (data.inChest && changes.inChest === false && this.cameras.main.worldView.contains(sprite.x, sprite.y)) {
+      this.playSound('chest');
+    }
     Object.assign(data, changes);
     if (!data.visible && !data.respawn) {
       this.removeItem(view);
@@ -434,6 +454,7 @@ export class WorldScene extends Phaser.Scene {
   private showSpeech(speaker: Speaker, text: string) {
     speaker.speechTimer?.remove();
     speaker.bubble.setText(text).setVisible(Boolean(text));
+    if (text) this.playSound('chat');
     speaker.speechTimer = text ? this.time.delayedCall(5000, () => speaker.bubble.setVisible(false)) : undefined;
   }
 
@@ -443,7 +464,7 @@ export class WorldScene extends Phaser.Scene {
     this.showSpeech(npc, line);
     if (line && !this.firstDialogueShown) {
       this.firstDialogueShown = true;
-      this.onFirstDialogue?.();
+      this.onFirstDialogue();
     }
   }
 
@@ -488,6 +509,9 @@ export class WorldScene extends Phaser.Scene {
     if (changes.targetID !== undefined) avatar.targetID = changes.targetID;
     if (changes.inFight !== undefined) avatar.inFight = changes.inFight;
     if (changes.alive !== undefined) {
+      if (avatar.alive && !changes.alive && (isHero || this.cameras.main.worldView.contains(avatar.container.x, avatar.container.y))) {
+        this.playSound('death');
+      }
       avatar.alive = changes.alive;
       if (isHero) this.onHeroAlive(changes.alive);
     }
@@ -601,6 +625,7 @@ export class WorldScene extends Phaser.Scene {
         this.position(avatar, door?.to ?? end);
         this.showFrame(avatar, idleFrame[avatar.direction]);
         if (isHero) {
+          if (!this.cameraDoor) this.onOutdoorArrival(end);
           this.destination?.setVisible(false);
           if (crossing) {
             this.lastCrossing = crossing;

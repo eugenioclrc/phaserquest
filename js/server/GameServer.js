@@ -344,11 +344,13 @@ GameServer.savePlayer = async function (player) {
 };
 
 GameServer.deletePlayer = async function (id) {
-  if (typeof id !== 'string' || !ObjectId.isValid(id)) return;
+  if (typeof id !== 'string' || !ObjectId.isValid(id)) return false;
   try {
-    await GameServer.server.db.collection('players').deleteOne({ _id: new ObjectId(id) });
+    const result = await GameServer.server.db.collection('players').deleteOne({ _id: new ObjectId(id) });
+    return result.acknowledged;
   } catch (err) {
     console.error('Could not delete character', err);
+    return false;
   }
 };
 

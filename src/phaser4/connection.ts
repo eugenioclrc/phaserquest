@@ -36,6 +36,7 @@ type ClientEvents = {
   path(movement: { path: Tile[]; action: PathAction; or: number }): void;
   revive(): void;
   chat(text: string): void;
+  delete(data: { id: string }, ack: (reply: { ok: boolean }) => void): void;
 };
 
 type ConnectionEvents = {
@@ -55,6 +56,15 @@ export function savedCharacter(): { id: string; name: string } | null {
   return id && name ? { id, name } : null;
 }
 
+function clearCharacter(id: string) {
+  if (localStorage.getItem('playerID') !== id) return;
+  for (const key of Object.keys(localStorage)) {
+    if (['playerID', 'name', 'armor', 'weapon'].includes(key) || /^(ach|killed_)\d+$/.test(key)) {
+      localStorage.removeItem(key);
+    }
+  }
+}
+
 function unpack<T>(data: ArrayBuffer | T, schema: ObjectSchema): T {
   return data instanceof ArrayBuffer ? Decoder.decode(data, schema) as T : data;
 }
@@ -64,6 +74,7 @@ export function createConnection(events: ConnectionEvents) {
   let request: EntryRequest | null = null;
   let entered = false;
   let retry: number | undefined;
+  let deleting = false;
 
   function cancelRetry() {
     window.clearTimeout(retry);
@@ -144,16 +155,30 @@ export function createConnection(events: ConnectionEvents) {
   socket.on('dbError', (error) => {
     if (!request || entered) return;
     cancelRetry();
-    if (!error?.retryable && !request.new && localStorage.getItem('playerID') === request.id) {
-      for (const key of ['playerID', 'name', 'armor', 'weapon']) localStorage.removeItem(key);
-    }
+    if (!error?.retryable && !request.new) clearCharacter(request.id);
     request = null;
     events.error(error?.retryable ? 'Could not reach the character database. Try again.' : 'This saved character could not be found.');
   });
 
   return {
+    async deleteCharacter(id: string): Promise<boolean> {
+      if (deleting || request || savedCharacter()?.id !== id) return false;
+      deleting = true;
+      try {
+        socket.connect();
+        const reply = await socket.timeout(5000).emitWithAck('delete', { id });
+        if (reply?.ok !== true) return false;
+        clearCharacter(id);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        deleting = false;
+        socket.disconnect();
+      }
+    },
     play(name?: string) {
-      if (request) return;
+      if (request || deleting) return;
       if (name === undefined) {
         const saved = savedCharacter();
         if (!saved) {
