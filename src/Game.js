@@ -280,11 +280,11 @@ Game.updatePlayerStatus = function updatePlayerStatus(player, info) {
     Game.removePlayer(player, true);
     return;
   }
-  if (info.x && info.y) {
+  if (info.x !== undefined && info.y !== undefined) {
     player.position.set(info.x * Game.map.tileWidth, info.y * Game.map.tileHeight);
   }
 
-  if (info.aoi) { // Update the id of the AOI that the player is in
+  if (info.aoi !== undefined) { // Update the id of the AOI that the player is in
     player.aoi = info.aoi;
     if (player.isPlayer) Game.updateDisplayList();
   }
@@ -334,9 +334,10 @@ Game.updateEquipment = function updateEquipment(player, eqID) {
 
 // info contains the updated data from the server
 Game.updatePlayerAction = function updatePlayerAction(player, info) {
-  if (info.alive === true && player.alive === false) player.respawn();
+  if (info.alive === true && (!player.alive || player.deathTimer !== undefined || player.deathmark)) player.respawn();
   if (!player.alive) return;
   if (info.alive === false && player.alive === true) {
+    if (player.tween) player.stopMovement(false);
     if (!player.isPlayer) { // only for other players; for self, attackAndDisplay will be used instead
       const hitter = Game.monstersTable[info.lastHitter];
       if (hitter) hitter.attack();
@@ -369,6 +370,7 @@ Game.updateMonsterAction = function updateMonsterAction(monster, info) { // info
     return;
   } else if (info.alive == true && monster.alive == false) {
     monster.respawn();
+    if (info.x !== undefined && info.y !== undefined) monster.setPosition(info.x, info.y);
   }
   if (info.route) Game.moveMonster(monster.id, info.route.path, info.route.delta);
   if (info.inFight == false && monster.inFight == true) {

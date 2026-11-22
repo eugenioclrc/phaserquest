@@ -26,9 +26,10 @@
 
     <section id="game-hud" class="game-hud" aria-label="Player controls" hidden>
       <dl class="game-stats">
-        <div><dt>Health</dt><dd id="hero-health">100</dd></div>
+        <div><dt>Health</dt><dd><meter id="health-meter" aria-label="Health" min="0" max="100" value="100"></meter> <span id="hero-health">100</span></dd></div>
         <div><dt>Players</dt><dd id="players-online">0</dd></div>
       </dl>
+      <button id="revive-button" type="button" hidden>Revive</button>
 
       <form id="chat-form" class="chat-form">
         <label for="chat-message">Chat</label>

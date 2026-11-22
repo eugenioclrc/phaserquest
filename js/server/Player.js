@@ -43,11 +43,6 @@ class Player extends MovingEntity {
     this.lastSavedPosition = { x: this.x, y: this.y };
   }
 
-  resetPosition() {
-    this.setProperty('x', this.lastSavedPosition.x);
-    this.setProperty('y', this.lastSavedPosition.y);
-  }
-
   trim() {
     // Return a smaller object, containing a subset of the initial properties, to be sent to the client
     const trimmed = {};
@@ -167,9 +162,7 @@ class Player extends MovingEntity {
 
   revive() {
     if (this.alive) return;
-    this.life = this.maxLife;
-    this.resetPosition();
-    this.setProperty('alive', true);
+    this.respawnAt(this.lastSavedPosition.x, this.lastSavedPosition.y);
     this.updatePacket.updatePosition(this.x, this.y);
   }
 }

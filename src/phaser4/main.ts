@@ -14,6 +14,8 @@ const playButton = element<HTMLButtonElement>('play-button');
 const gameHud = element<HTMLElement>('game-hud');
 const online = element<HTMLElement>('players-online');
 const health = element<HTMLElement>('hero-health');
+const healthMeter = element<HTMLMeterElement>('health-meter');
+const reviveButton = element<HTMLButtonElement>('revive-button');
 const chatForm = element<HTMLFormElement>('chat-form');
 const chatMessage = element<HTMLInputElement>('chat-message');
 const status = element<HTMLElement>('status');
@@ -31,8 +33,19 @@ function showCharacterForm() {
 
 const world = new WorldScene(
   () => { playButton.disabled = false; },
-  (path, orientation) => connection.move(path, orientation),
+  (path, orientation, action) => connection.move(path, orientation, action),
+  (alive) => {
+    if (reviveButton.hidden === alive) return;
+    reviveButton.hidden = alive;
+    reviveButton.disabled = false;
+    showHealth(alive ? 100 : 0);
+  },
 );
+
+function showHealth(life: number) {
+  health.textContent = String(life);
+  healthMeter.value = life;
+}
 
 function setStatus(message: string) {
   status.textContent = message;
@@ -46,13 +59,13 @@ const connection = createConnection({
     world.enter(player, nbAOIhorizontal, lastAOIid);
     characterForm.hidden = true;
     gameHud.hidden = false;
-    health.textContent = '100';
+    showHealth(player.alive === false ? 0 : 100);
     setStatus('');
   },
   updateWorld: update => world.applyWorld(update),
   updateSelf(update) {
     world.applySelf(update);
-    if (update.life !== undefined) health.textContent = String(update.life);
+    if (update.life !== undefined) showHealth(update.life);
   },
   reset: tile => world.reset(tile),
   say: (id, text) => world.say(id, text),
@@ -72,6 +85,9 @@ const connection = createConnection({
 });
 
 showCharacterForm();
+reviveButton.addEventListener('click', () => {
+  if (!reviveButton.hidden && connection.revive()) reviveButton.disabled = true;
+});
 characterForm.addEventListener('submit', (event) => {
   event.preventDefault();
   if (playButton.disabled) return;

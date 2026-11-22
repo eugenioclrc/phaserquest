@@ -44,11 +44,7 @@ class Monster extends MovingEntity {
   }
 
   respawn() {
-    this.life = this.maxLife;
-    GameServer.moveAtLocation(this, this.x, this.y, this.startX, this.startY);
-    this.x = this.startX;
-    this.y = this.startY;
-    this.setProperty('alive', true);
+    this.respawnAt(this.startX, this.startY);
     if (this.chestArea) this.chestArea.increment();
   }
 

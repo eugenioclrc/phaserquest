@@ -91,6 +91,7 @@ class MovingEntity extends GameObject {
 
   damage() {
     if (!this.alive || !this.target || !this.target.alive) return;
+    if (GameServer.adjacentNoDiagonal(this, this.target) <= 0) return;
     if ((Date.now() - this.lastDamage) < GameServer.damageDelay) return;
     this.lastDamage = Date.now();
     let damage = (this.atk * randomInt(5, 10)) - (this.target.def * randomInt(1, 3));
@@ -121,6 +122,7 @@ class MovingEntity extends GameObject {
   }
 
   die() {
+    this.route = undefined;
     this.manageFoes();
     if (this.lastHitter) this.setProperty('lastHitter', this.lastHitter.id);
     this.endFight();
@@ -130,6 +132,18 @@ class MovingEntity extends GameObject {
       setTimeout(GameServer.dropLoot, 200, this.lootTable, this.x, this.y);
       if (this.chestArea) this.chestArea.decrement();
     }
+  }
+
+  respawnAt(x, y) {
+    const previousX = this.x;
+    const previousY = this.y;
+    this.x = x;
+    this.y = y;
+    this.life = this.maxLife;
+    GameServer.moveAtLocation(this, previousX, previousY, x, y);
+    this.updateAOIs('x', x);
+    this.updateAOIs('y', y);
+    this.setProperty('alive', true);
   }
 
   endFight() {

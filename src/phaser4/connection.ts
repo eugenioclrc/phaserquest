@@ -1,7 +1,7 @@
 import { io, type Socket } from 'socket.io-client';
 import { CoDec, type ObjectSchema } from '../../shared/CoDec.ts';
 import Decoder from '../Decoder.ts';
-import type { PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
+import type { PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
 
 type EntryRequest = { new: true; name: string } | { new: false; id: string };
 
@@ -33,7 +33,8 @@ type ServerEvents = {
 type ClientEvents = {
   'init-world'(request: EntryRequest & { clientTime: number }): void;
   ponq(stamp: number): void;
-  path(movement: { path: Tile[]; action: { action: 0 }; or: number }): void;
+  path(movement: { path: Tile[]; action: PathAction; or: number }): void;
+  revive(): void;
   chat(text: string): void;
 };
 
@@ -171,9 +172,12 @@ export function createConnection(events: ConnectionEvents) {
       if (socket.connected) requestEntry();
       else socket.connect();
     },
-    move(path: Tile[], orientation: number): boolean {
-      if (path.length < 2 || path.length > 60) return false;
-      return sendAction(() => socket.emit('path', { path, action: { action: 0 }, or: orientation }));
+    move(path: Tile[], orientation: number, action: PathAction = { action: 0 }): boolean {
+      if (path.length < (action.action === 0 ? 2 : 1) || path.length > 60) return false;
+      return sendAction(() => socket.emit('path', { path, action, or: orientation }));
+    },
+    revive(): boolean {
+      return sendAction(() => socket.emit('revive'));
     },
     chat(text: string): boolean {
       if (!text.trim() || text.length > 300) return false;

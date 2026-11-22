@@ -525,12 +525,13 @@ GameServer.handlePath = function (path, action, orientation, socket) { // Proces
     }
   }
 
-  const departureTime = Date.now() - socket.latency; // Needed the corrected departure time for the update loop (updateWalk())
-  player.setRoute(path, departureTime, socket.latency, action, orientation);
   if (action && action.action == 3) { // fight
     const monster = GameServer.monstersTable[action.id];
-    if (monster.alive) player.setTarget(monster);
+    if (!monster?.alive) return false;
+    if (!player.inFight || !player.target?.alive) player.setTarget(monster);
   }
+  const departureTime = Date.now() - socket.latency; // Needed the corrected departure time for the update loop (updateWalk())
+  player.setRoute(path, departureTime, socket.latency, action, orientation);
   if (player.inFight && action && action.action != 3) player.endFight();
   return true;
 };
@@ -585,6 +586,12 @@ GameServer.checkAction = function (player) {
     const action = player.route.action;
     if (action.action == 3) { // fight
       const monster = GameServer.monstersTable[action.id];
+      if (!monster?.alive || GameServer.adjacentNoDiagonal(player, monster) <= 0) {
+        if (player.target?.id === action.id && (!monster?.alive || !player.inFight)) player.setTarget(null);
+        return;
+      }
+      if (!player.alive) return;
+      if (player.target !== monster) player.setTarget(monster);
       if (!GameServer.areFighting(player, monster)) GameServer.setUpFight(player, monster);
     } else if (action.action == 4) { // chest
       const chest = GameServer.items.getFirstFiltered(action.x, action.y, ['visible', 'chest']);

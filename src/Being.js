@@ -127,11 +127,7 @@ export default class Being extends Phaser.Sprite {
       const sound = (this.types.includes('Player') ? 'hit1' : 'hurt');
       Game.sounds.play(sound);
     }
-    if (this.target.deathmark) {
-      setTimeout((_target) => {
-        _target.die(true);
-      }, 500, this.target);
-    }
+    if (this.target.deathmark) this.target.delayedDeath(500);
     this.idle();
   }
 
@@ -339,14 +335,18 @@ export default class Being extends Phaser.Sprite {
   }
 
   delayedDeath(delay) {
-    setTimeout((_being) => {
-      _being.die(true);
-    }, delay, this);
+    if (this.deathTimer !== undefined) return;
+    this.deathTimer = setTimeout(() => {
+      this.deathTimer = undefined;
+      this.die(true);
+    }, delay);
   }
 
   delayedKill(delay) {
-    setTimeout((_being) => {
-      _being.kill();
-    }, delay, this);
+    clearTimeout(this.deathTimer);
+    this.deathTimer = setTimeout(() => {
+      this.deathTimer = undefined;
+      this.kill();
+    }, delay);
   }
 }

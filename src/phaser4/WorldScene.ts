@@ -1,7 +1,8 @@
 import * as Phaser from 'phaser4';
 import EasyStar from 'easystarjs';
 import { AOIutils } from '../../shared/AOIutils.ts';
-import type { PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
+import type { PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
+import { MonsterView, type MonsterDefinition } from './MonsterView.ts';
 
 type Direction = 1 | 2 | 3 | 4;
 
@@ -27,6 +28,8 @@ type Avatar = {
   weaponKey: string;
   direction: Direction;
   alive: boolean;
+  inFight?: boolean;
+  targetID?: number;
   aoi?: number;
   motion?: Phaser.Tweens.Tween;
   speechTimer?: Phaser.Time.TimerEvent;
@@ -34,6 +37,7 @@ type Avatar = {
 
 const idleFrame = { 1: 42, 2: 20, 3: 9, 4: 31 };
 const walkFrame = { 1: 38, 2: 16, 3: 5, 4: 27 };
+const attackFrame = { 1: 33, 2: 11, 3: 0, 4: 22 };
 const doorDirection: Partial<Record<string, Direction>> = { l: 1, u: 2, r: 3, d: 4 };
 
 function tileDistance(from: Tile, to: Tile): number {
@@ -62,6 +66,9 @@ function isDirection(value: number | undefined): value is Direction {
 
 export class WorldScene extends Phaser.Scene {
   private readonly avatars = new Map<number, Avatar>();
+  private readonly monsters = new Map<number, MonsterView>();
+  private readonly species = new Map<number, { key: string; definition: MonsterDefinition }>();
+  private damageLabels?: Phaser.GameObjects.Group;
   private readonly equipment = new Map<number, Equipment>();
   private readonly doors = new Map<string, Door>();
   private readonly crossingsByDestination = new Map<string, DoorCrossing>();
@@ -77,7 +84,8 @@ export class WorldScene extends Phaser.Scene {
 
   constructor(
     private readonly onReady: () => void,
-    private readonly onPath: (path: Tile[], orientation: number) => boolean,
+    private readonly onPath: (path: Tile[], orientation: number, action?: PathAction) => boolean,
+    private readonly onHeroAlive: (alive: boolean) => void,
   ) {
     super('world');
   }
@@ -87,6 +95,7 @@ export class WorldScene extends Phaser.Scene {
     this.load.image('tilesheet', '/assets/tilesets/tilesheet.png');
     this.load.atlas('atlas1', '/assets/sprites/atlas1.png', '/assets/sprites/atlas1.json');
     this.load.atlas('players', '/assets/sprites/atlas3.png', '/assets/sprites/atlas3.json');
+    this.load.atlas('monsters', '/assets/sprites/atlas4.png', '/assets/sprites/atlas4.json');
     this.load.json('db', '/assets/json/db.json');
   }
 
@@ -135,8 +144,12 @@ export class WorldScene extends Phaser.Scene {
       });
     }
 
-    const { items } = this.cache.json.get('db') as { items: Record<string, Equipment> };
+    const { items, monsters } = this.cache.json.get('db') as {
+      items: Record<string, Equipment>; monsters: Record<string, MonsterDefinition>;
+    };
     for (const item of Object.values(items)) this.equipment.set(item.id, item);
+    for (const [key, definition] of Object.entries(monsters)) this.species.set(definition.id, { key, definition });
+    this.damageLabels = this.add.group();
 
     this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
     this.destination = this.add.image(0, 0, 'atlas1', 'target_0').setOrigin(0).setDepth(-0.5).setVisible(false);
@@ -144,6 +157,7 @@ export class WorldScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.heroId = undefined;
       this.avatars.clear();
+      this.monsters.clear();
     });
     this.onReady();
   }
@@ -157,6 +171,19 @@ export class WorldScene extends Phaser.Scene {
   }
 
   applyWorld(update: WorldUpdate) {
+    for (const snapshot of update.newmonsters ?? []) {
+      const current = this.monsters.get(snapshot.id);
+      const species = this.species.get(snapshot.monster);
+      if (current) current.apply(snapshot, this.time.now);
+      else if (species) {
+        this.monsters.set(snapshot.id, new MonsterView(
+          this, species.key, species.definition, this.tileWidth, this.tileHeight, snapshot,
+        ));
+      }
+    }
+    for (const [key, changes] of Object.entries(update.monsters ?? {})) {
+      this.monsters.get(Number(key))?.apply(changes, this.time.now);
+    }
     for (const player of update.newplayers ?? []) {
       if (player.id !== this.heroId) this.addAvatar(player);
     }
@@ -176,12 +203,47 @@ export class WorldScene extends Phaser.Scene {
   }
 
   applySelf(update: PersonalUpdate) {
+    const hero = this.heroId === undefined ? undefined : this.avatars.get(this.heroId);
+    if (!hero) return;
+    for (const hit of update.hp ?? []) {
+      const target = hit.target
+        ? (hero.targetID === undefined ? undefined : this.monsters.get(hero.targetID)?.sprite)
+        : hero.container;
+      if (!target) continue;
+      const healing = !hit.target && hit.from === undefined;
+      const text = this.add.text(target.x + this.tileWidth / 2, target.y - 20, `${healing ? '+' : '−'}${hit.hp}`, {
+        fontSize: '18px', color: healing ? '#79ea84' : '#ffac96', stroke: '#29160c', strokeThickness: 3,
+      }).setOrigin(0.5, 1).setDepth(100000);
+      this.damageLabels?.add(text);
+      this.tweens.add({ targets: text, y: text.y - 28, alpha: 0, duration: 800, onComplete: () => text.destroy() });
+    }
+    if (update.life === 0) this.updateAvatar(hero, { alive: false }, true);
     if (update.x === undefined || update.y === undefined) return;
     this.crossingsByDestination.clear();
     this.lastCrossing = undefined;
     this.reset({ x: update.x, y: update.y });
-    const hero = this.heroId === undefined ? undefined : this.avatars.get(this.heroId);
-    if (hero) this.setHeroCamera(hero);
+    this.updateAvatar(hero, { alive: true }, true);
+    this.setHeroCamera(hero);
+  }
+
+  update(time: number) {
+    for (const monster of this.monsters.values()) {
+      const target = monster.targetID === undefined ? undefined : this.avatars.get(monster.targetID);
+      monster.render(time, target?.alive ? this.tileAt(target) : undefined);
+    }
+    for (const avatar of this.avatars.values()) {
+      if (!avatar.inFight || !avatar.alive || avatar.motion || avatar.targetID === undefined) continue;
+      const monster = this.monsters.get(avatar.targetID);
+      const tile = this.tileAt(avatar);
+      const target = monster?.tile;
+      if (!monster?.alive || !target || tileDistance(tile, target) !== 1) {
+        this.showFrame(avatar, idleFrame[avatar.direction]);
+        continue;
+      }
+      avatar.direction = directionBetween(tile, target);
+      const frame = Math.floor(time % 1000 * 14 / 1000);
+      this.showFrame(avatar, frame < 5 ? attackFrame[avatar.direction] + frame : idleFrame[avatar.direction]);
+    }
   }
 
   reset({ x, y }: Tile) {
@@ -223,6 +285,9 @@ export class WorldScene extends Phaser.Scene {
     this.lastCrossing = undefined;
     this.outdoorWidth = 0;
     for (const id of this.avatars.keys()) this.removeAvatar(id);
+    for (const monster of this.monsters.values()) monster.sprite.destroy();
+    this.monsters.clear();
+    this.damageLabels?.clear(true, true);
   }
 
   private setHeroCamera(hero: Avatar, door?: Door) {
@@ -287,7 +352,12 @@ export class WorldScene extends Phaser.Scene {
       avatar.weaponKey = weapon.key;
       if (weapon.offsets) avatar.weapon.setPosition(weapon.offsets.x, weapon.offsets.y);
     }
-    if (changes.alive !== undefined) avatar.alive = changes.alive;
+    if (changes.targetID !== undefined) avatar.targetID = changes.targetID;
+    if (changes.inFight !== undefined) avatar.inFight = changes.inFight;
+    if (changes.alive !== undefined) {
+      avatar.alive = changes.alive;
+      if (isHero) this.onHeroAlive(changes.alive);
+    }
     avatar.container.setVisible(avatar.alive);
     if (changes.x !== undefined && changes.y !== undefined) {
       const tile = { x: changes.x, y: changes.y };
@@ -315,18 +385,28 @@ export class WorldScene extends Phaser.Scene {
     this.avatars.delete(id);
   }
 
-  private walk(pointer: Phaser.Input.Pointer) {
+  private walk(pointer: Phaser.Input.Pointer, hits: Phaser.GameObjects.GameObject[] = []) {
     if (this.heroId === undefined || (!pointer.wasTouch && !pointer.leftButtonReleased())) return;
     const hero = this.avatars.get(this.heroId);
     if (!hero?.alive) return;
     const at = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-    const end = { x: Math.floor(at.x / this.tileWidth), y: Math.floor(at.y / this.tileHeight) };
+    let end = { x: Math.floor(at.x / this.tileWidth), y: Math.floor(at.y / this.tileHeight) };
+    let action: PathAction = { action: 0 };
+    for (const [id, monster] of this.monsters) {
+      if (monster.alive && (hits.includes(monster.sprite) || tileDistance(monster.tile, end) === 0)) {
+        action = { action: 3, id };
+        end = monster.tile;
+        break;
+      }
+    }
     const start = this.tileAt(hero);
     if (tileDistance(start, end) > 28) return;
     const path = this.findPath(start, end);
-    if (!path || path.length < 2 || path.length > 60) return;
+    if (!path || path.length < 2) return;
     const orientation = directionBetween(path[path.length - 2], end);
-    if (this.onPath(path, orientation)) this.move(hero, path, orientation);
+    if (action.action === 3) path.pop();
+    if (path.length > 60 || !this.onPath(path, orientation, action)) return;
+    this.move(hero, path, orientation);
   }
 
   private findPath(start: Tile, end: Tile): Tile[] | null {
@@ -350,6 +430,7 @@ export class WorldScene extends Phaser.Scene {
     avatar.motion = this.tweens.addCounter({
       from: 0, to: path.length - 1, duration: Math.max(1, (path.length - 1) * 120 - latency),
       onUpdate: (tween) => {
+        if (path.length === 1) return;
         const progress = tween.getValue() ?? 0;
         const index = Math.min(Math.floor(progress), path.length - 2);
         const from = path[index];

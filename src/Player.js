@@ -202,6 +202,9 @@ export default class Player extends Human {
   }
 
   respawn() {
+    clearTimeout(this.deathTimer);
+    this.deathTimer = undefined;
+    this.deathmark = false;
     this.revive(); // method from the Phaser Sprite class
     this.orientation = this.game.rnd.between(1, 4);
     if (this.isPlayer) {
