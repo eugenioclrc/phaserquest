@@ -139,6 +139,7 @@ button:disabled {
 
 #phaser4-game canvas {
   display: block;
+  touch-action: manipulation;
 }
 
 .game-hud {
