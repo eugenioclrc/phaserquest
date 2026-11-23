@@ -16,6 +16,16 @@ test('tile filters find visible loot behind hidden items and chests', () => {
   expect(items.getFirstFiltered(0, 0, ['visible'], ['inChest'])).toBe(loot);
 });
 
+test('saved Firefox armor round-trips without sharing the burger pickup ID', async () => {
+  await GameServer.readMap();
+  for (const armor of ['firefox', 'item-burger']) {
+    const player = new Player(GameServer);
+    player.getDataFromDb({ _id: new ObjectId(), x: 41, y: 222, name: 'Scout', weapon: 'sword1', armor });
+    expect(player.armor).not.toBe(GameServer.db.items['item-burger'].id);
+    expect(player.dbTrim().armor).toBe('firefox');
+  }
+});
+
 test('monster pathfinding uses every blocked tile in the world collision grid', async () => {
   await GameServer.readMap();
   const mismatches = GameServer.collisionGrid.flatMap((row, y) => row.flatMap((blocked, x) =>

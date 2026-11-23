@@ -4,6 +4,7 @@ import EasyStar from 'easystarjs';
 import type { ItemSnapshot, PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
 import { MonsterView, type MonsterDefinition } from './MonsterView.ts';
 import { turnFrom, walkProgress, type PlayerWalk } from './playerWalk.ts';
+import { cameraViewport } from './cameraViewport.ts';
 
 type Direction = 1 | 2 | 3 | 4;
 
@@ -53,6 +54,9 @@ type Avatar = Speaker & {
 };
 
 const npcTilesetFirstGid = 1961;
+const villageView = { x: 38, y: 220 };
+const fixedRoomSize = { width: 980, height: 500 };
+const attackMarkMs = 350;
 const idleFrame = { 1: 42, 2: 20, 3: 9, 4: 31 };
 const walkFrame = { 1: 38, 2: 16, 3: 5, 4: 27 };
 const attackFrame = { 1: 33, 2: 11, 3: 0, 4: 22 };
@@ -97,8 +101,11 @@ export class WorldScene extends Phaser.Scene {
   private collision: number[][] = [];
   private tileWidth = 32;
   private tileHeight = 32;
+  private mapWidth = 0;
+  private mapHeight = 0;
   private heroId?: number;
   private destination?: Phaser.GameObjects.Image;
+  private markedMonster?: { id: number; expires: number };
   private cameraDoor?: Door;
   private outdoorWidth = 0;
   private lastCrossing?: DoorCrossing;
@@ -120,6 +127,8 @@ export class WorldScene extends Phaser.Scene {
     this.load.atlas('atlas1', '/assets/sprites/atlas1.png', '/assets/sprites/atlas1.json');
     this.load.atlas('players', '/assets/sprites/atlas3.png', '/assets/sprites/atlas3.json');
     this.load.atlas('monsters', '/assets/sprites/atlas4.png', '/assets/sprites/atlas4.json');
+    this.load.image('attack-mark', '/assets/sprites/sword.png');
+    this.load.image('talk-mark', '/assets/sprites/talk.png');
     this.load.json('db', '/assets/json/db.json');
     this.load.json('entities', '/assets/json/entities_client.json');
     this.load.audioSprite('sounds', '/assets/audio/sounds.json', ['/assets/audio/sounds.mp3', '/assets/audio/sounds.ogg']);
@@ -131,6 +140,8 @@ export class WorldScene extends Phaser.Scene {
     if (!tileset) throw new Error('The world tileset is missing');
     this.tileWidth = map.tileWidth;
     this.tileHeight = map.tileHeight;
+    this.mapWidth = map.widthInPixels;
+    this.mapHeight = map.heightInPixels;
     const layers = map.layers.map(({ name }, index) => {
       const layer = map.createLayer(name, tileset, 0, 0);
       if (!layer) throw new Error(`The map layer ${name} is missing`);
@@ -180,10 +191,12 @@ export class WorldScene extends Phaser.Scene {
     for (const [key, definition] of Object.entries(monsters)) this.species.set(definition.id, { key, definition });
     this.damageLabels = this.add.group();
 
-    this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
+    this.resizeCamera();
+    this.scale.on(Phaser.Scale.Events.RESIZE, this.resizeCamera, this);
     this.destination = this.add.image(0, 0, 'atlas1', 'target_0').setOrigin(0).setDepth(-0.5).setVisible(false);
     this.input.on(Phaser.Input.Events.POINTER_UP, this.walk, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.scale.off(Phaser.Scale.Events.RESIZE, this.resizeCamera, this);
       this.heroId = undefined;
       this.avatars.clear();
       this.monsters.clear();
@@ -298,6 +311,11 @@ export class WorldScene extends Phaser.Scene {
       const target = monster.targetID === undefined ? undefined : this.avatars.get(monster.targetID);
       monster.render(time, target?.alive ? this.tileAt(target) : undefined);
     }
+    if (this.markedMonster) {
+      const monster = this.monsters.get(this.markedMonster.id);
+      if (monster?.alive && now < this.markedMonster.expires) this.positionAttackMark(monster);
+      else this.clearDestination();
+    }
     for (const avatar of this.avatars.values()) {
       this.updateWalk(avatar, now);
       if (!avatar.inFight || !avatar.alive || avatar.motion || avatar.targetID === undefined) continue;
@@ -327,7 +345,7 @@ export class WorldScene extends Phaser.Scene {
     }
     this.crossingsByDestination.clear();
     if (confirmed?.door.orientation) hero.direction = confirmed.door.orientation;
-    this.destination?.setVisible(false);
+    this.clearDestination();
     this.place(hero, tile);
     const crossing = this.lastCrossing;
     // The server can reach the door before or after the local walk finishes.
@@ -348,9 +366,8 @@ export class WorldScene extends Phaser.Scene {
   }
 
   leave() {
-    if (this.heroId !== undefined) this.cameras.main.stopFollow();
     this.heroId = undefined;
-    this.destination?.setVisible(false);
+    this.clearDestination();
     this.cameraDoor = undefined;
     this.crossingsByDestination.clear();
     this.lastCrossing = undefined;
@@ -366,20 +383,40 @@ export class WorldScene extends Phaser.Scene {
       npc.nextLine = 0;
       this.showSpeech(npc, '');
     }
+    this.resizeCamera();
   }
 
   private setHeroCamera(hero: Avatar, door?: Door) {
-    const camera = this.cameras.main;
     this.cameraDoor = door?.follow || door?.camera ? door : undefined;
     this.outdoorWidth = 0;
-    if (door?.camera && !door.follow) {
-      camera.stopFollow().removeBounds().setScroll(door.camera.x * this.tileWidth, door.camera.y * this.tileHeight);
+    this.frameCamera(hero);
+  }
+
+  private resizeCamera() {
+    const hero = this.heroId === undefined ? undefined : this.avatars.get(this.heroId);
+    this.frameCamera(hero);
+  }
+
+  private frameCamera(hero?: Avatar) {
+    const camera = this.cameras.main;
+    const door = this.cameraDoor;
+    const fixed = door?.follow ? undefined : door?.camera;
+    const room = fixed
+      ? new Phaser.Geom.Rectangle(fixed.x * this.tileWidth, fixed.y * this.tileHeight, fixedRoomSize.width, fixedRoomSize.height)
+      : door?.bounds;
+    const { width, height } = this.scale.baseSize;
+    const view = cameraViewport(width, height, this.tileWidth, this.tileHeight, room);
+    camera.setViewport(view.x, view.y, view.width, view.height).setZoom(view.zoom);
+
+    if (!hero) {
+      camera.stopFollow().setBounds(0, 0, this.mapWidth, this.mapHeight)
+        .centerOn(villageView.x * this.tileWidth, villageView.y * this.tileHeight);
       return;
     }
-    if (door?.follow) {
-      const bounds = door.bounds;
-      if (bounds) camera.setBounds(bounds.x, bounds.y, Math.max(bounds.width, camera.width), bounds.height);
-      else camera.setBounds(this.tileWidth - 10, this.tileHeight - 10, 170 * this.tileWidth, 311 * this.tileHeight);
+    if (room) {
+      camera.setBounds(room.x, room.y, room.width, room.height);
+    } else if (door?.follow) {
+      camera.setBounds(this.tileWidth - 10, this.tileHeight - 10, 170 * this.tileWidth, 311 * this.tileHeight);
     } else {
       this.updateOutdoorBounds(hero.container.y);
     }
@@ -510,7 +547,8 @@ export class WorldScene extends Phaser.Scene {
     const armor = changes.armor === undefined ? undefined : this.itemInfo(changes.armor);
     const weapon = changes.weapon === undefined ? undefined : this.itemInfo(changes.weapon);
     if (armor?.type === 2) {
-      avatar.armorKey = armor.key;
+      // Firefox already uses the leather icon and has no player frames of its own in the atlas.
+      avatar.armorKey = armor.key === 'firefox' ? 'leatherarmor' : armor.key;
       if (isHero) this.onHeroEquipment('armor', armor.key);
     }
     if (weapon?.type === 1) {
@@ -535,7 +573,7 @@ export class WorldScene extends Phaser.Scene {
     }
     if (!avatar.alive) {
       avatar.motion = undefined;
-      if (isHero) this.destination?.setVisible(false);
+      if (isHero) this.clearDestination();
     }
     if (!avatar.motion) this.showFrame(avatar, idleFrame[avatar.direction]);
     if (avatar.alive && changes.route && !isHero && changedRoute) {
@@ -560,11 +598,14 @@ export class WorldScene extends Phaser.Scene {
 
   private walk(pointer: Phaser.Input.Pointer, hits: Phaser.GameObjects.GameObject[] = []) {
     if (this.heroId === undefined || (!pointer.wasTouch && !pointer.leftButtonReleased())) return;
+    const camera = this.cameras.main;
+    if (pointer.x < camera.x || pointer.x >= camera.x + camera.width ||
+        pointer.y < camera.y || pointer.y >= camera.y + camera.height) return;
     const hero = this.avatars.get(this.heroId);
     if (!hero?.alive) return;
     const now = performance.now();
     this.updateWalk(hero, now);
-    const at = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const at = camera.getWorldPoint(pointer.x, pointer.y);
     const clicked = { x: Math.floor(at.x / this.tileWidth), y: Math.floor(at.y / this.tileHeight) };
     const target: { tile: Tile; action: PathAction; rank: number; npc?: NpcView } = {
       tile: clicked, action: { action: 0 }, rank: hits.length + 1,
@@ -589,6 +630,7 @@ export class WorldScene extends Phaser.Scene {
     const start = turn?.tile ?? this.tileAt(hero);
     if (npc && tileDistance(start, end) === 0) {
       if (hero.motion) return;
+      this.clearDestination();
       hero.direction = 2;
       this.showFrame(hero, idleFrame[hero.direction]);
       this.speak(npc);
@@ -600,8 +642,37 @@ export class WorldScene extends Phaser.Scene {
     const orientation = npc ? 2 : directionBetween(path[path.length - 2], end);
     if (action.action !== 0) path.pop();
     if (path.length > maxPathLength || !this.onPath(path, orientation, action)) return;
+    this.clearDestination();
+    const monster = action.action === 3 ? this.monsters.get(action.id) : undefined;
+    if (monster && action.action === 3) {
+      this.markedMonster = { id: action.id, expires: now + attackMarkMs };
+      this.destination?.setTexture('attack-mark').setOrigin(0.5, 0);
+      this.positionAttackMark(monster);
+    } else if (npc) {
+      this.destination?.setTexture('talk-mark').setOrigin(0.5, 1)
+        .setDepth(npc.sprite.depth + 0.1)
+        .setPosition(npc.sprite.x + this.tileWidth / 2, npc.sprite.y - npc.sprite.displayOriginY)
+        .setVisible(true);
+    } else {
+      const last = path[path.length - 1];
+      this.destination?.setTexture('atlas1', 'target_0').setOrigin(0).setDepth(-0.5)
+        .setPosition(last.x * this.tileWidth, last.y * this.tileHeight).setVisible(true);
+    }
     const localPath = turn?.previous ? [turn.previous, ...path] : path;
-    this.move(hero, localPath, orientation, turn?.elapsed, npc ? () => this.speak(npc) : undefined, now);
+    this.move(hero, localPath, orientation, turn?.elapsed, action.action === 3 ? undefined : () => {
+      this.clearDestination();
+      if (npc) this.speak(npc);
+    }, now);
+  }
+
+  private positionAttackMark(monster: MonsterView) {
+    this.destination?.setPosition(monster.sprite.x + this.tileWidth / 2, monster.sprite.y + this.tileHeight * 0.65)
+      .setDepth(monster.sprite.depth + 0.1).setVisible(true);
+  }
+
+  private clearDestination() {
+    this.markedMonster = undefined;
+    this.destination?.setVisible(false);
   }
 
   private findPath(start: Tile, end: Tile): Tile[] | null {
@@ -617,10 +688,7 @@ export class WorldScene extends Phaser.Scene {
     const door = this.doors.get(tileKey(end));
     const isHero = this.heroId !== undefined && this.avatars.get(this.heroId) === avatar;
     const crossing = isHero && door ? { path, door, previous: this.cameraDoor, completed: false } : undefined;
-    if (isHero) {
-      if (crossing) this.crossingsByDestination.set(tileKey(crossing.door.to), crossing);
-      this.destination?.setPosition(end.x * this.tileWidth, end.y * this.tileHeight).setVisible(true);
-    }
+    if (crossing) this.crossingsByDestination.set(tileKey(crossing.door.to), crossing);
     avatar.motion = {
       path,
       startedAt: now - elapsed,
@@ -635,7 +703,6 @@ export class WorldScene extends Phaser.Scene {
         this.showFrame(avatar, idleFrame[avatar.direction]);
         if (isHero) {
           if (!this.cameraDoor) this.onOutdoorArrival(end);
-          this.destination?.setVisible(false);
           if (crossing) {
             crossing.completed = true;
             this.lastCrossing = crossing;

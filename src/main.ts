@@ -10,6 +10,7 @@ function element<T extends HTMLElement>(id: string): T {
 }
 
 const characterForm = element<HTMLFormElement>('character-form');
+const entryScreen = element('entry-screen');
 const characterName = element<HTMLInputElement>('character-name');
 const playButton = element<HTMLButtonElement>('play-button');
 const resetButton = element<HTMLButtonElement>('reset-button');
@@ -17,25 +18,44 @@ const resetDialog = element<HTMLDialogElement>('reset-dialog');
 const resetStatus = element('reset-status');
 const cancelReset = element<HTMLButtonElement>('cancel-reset');
 const confirmReset = element<HTMLButtonElement>('confirm-reset');
+const gamePage = element('game-page');
+const gameSurface = element('phaser4-game');
 const gameHud = element<HTMLElement>('game-hud');
 const online = element<HTMLElement>('players-online');
 const health = element<HTMLElement>('hero-health');
 const healthMeter = element<HTMLMeterElement>('health-meter');
-const equipment = { armor: element('hero-armor'), weapon: element('hero-weapon') };
+const equipment = {
+  armor: { name: element('hero-armor'), icon: element<HTMLImageElement>('hero-armor-icon') },
+  weapon: { name: element('hero-weapon'), icon: element<HTMLImageElement>('hero-weapon-icon') },
+};
+const movementNotice = element('movement-notice');
 const lootNotice = element<HTMLOutputElement>('loot-notice');
 const reviveButton = element<HTMLButtonElement>('revive-button');
+const chatButton = element<HTMLButtonElement>('chat-button');
 const chatForm = element<HTMLFormElement>('chat-form');
 const chatMessage = element<HTMLInputElement>('chat-message');
 const status = element<HTMLElement>('status');
-const helpPanel = element<HTMLDetailsElement>('help-panel');
+const sessionMenu = element<HTMLDetailsElement>('session-menu');
+const menuButton = element('menu-button');
 const soundButton = element<HTMLButtonElement>('sound-button');
 const achievementNotice = element('achievement-notice');
 
+const viewport = window.visualViewport;
+if (viewport) {
+  const resizePage = () => {
+    if (viewport.scale === 1) gamePage.style.setProperty('--viewport-height', `${viewport.height}px`);
+  };
+  viewport.addEventListener('resize', resizePage);
+  resizePage();
+}
+
 let playerId: number | undefined;
 let resetId: string | undefined;
-let showHelpOnEntry = false;
+let showMoveOnEntry = false;
+let movementTimer: number | undefined;
+let lootTimer: number | undefined;
+let chatOpener: HTMLElement = chatButton;
 let achievements: Achievements;
-playButton.disabled = true;
 
 function showCharacterForm() {
   const saved = savedCharacter();
@@ -49,7 +69,11 @@ function showCharacterForm() {
 const world = new WorldScene(
   () => {
     const catalog = world.cache.json.get('db');
-    const instructions = [catalog.texts.help_move, catalog.texts.help_chat, catalog.texts.help_save];
+    const instructions = [
+      catalog.texts.help_move,
+      'Open Chat or press Enter to talk to nearby players.',
+      catalog.texts.help_save,
+    ];
     for (const text of instructions) {
       const line = document.createElement('li');
       line.textContent = text;
@@ -62,10 +86,17 @@ const world = new WorldScene(
       window.setTimeout(() => line.remove(), 5000);
       world.playSound('achievement');
     });
+    movementNotice.textContent = window.matchMedia('(pointer: coarse)').matches
+      ? 'Tap a tile to walk.'
+      : 'Click a tile to walk.';
     playButton.disabled = false;
     resetButton.disabled = false;
   },
-  (path, orientation, action) => connection.move(path, orientation, action),
+  (path, orientation, action) => {
+    const sent = connection.move(path, orientation, action);
+    if (sent) movementNotice.hidden = true;
+    return sent;
+  },
   (alive) => {
     reviveButton.disabled = false;
     if (reviveButton.hidden === alive) return;
@@ -74,8 +105,20 @@ const world = new WorldScene(
   },
   (slot, key) => {
     localStorage.setItem(slot, key);
-    equipment[slot].textContent = key.replace(/(.)(armor|sword|\d+)$/, '$1 $2')
+    const { name, icon } = equipment[slot];
+    if (name.dataset.item === key) return;
+    name.dataset.item = key;
+    name.textContent = key.replace(/(.)(armor|sword|\d+)$/, '$1 $2')
       .replace(/\b\w/g, letter => letter.toUpperCase());
+    icon.title = name.textContent;
+    const iconKey = world.cache.json.get('db').items[key]?.icon;
+    const frame = `${iconKey}_0`;
+    const source = iconKey && world.textures.get('players').has(frame)
+      ? world.textures.getBase64('players', frame)
+      : '';
+    icon.hidden = !source;
+    if (source) icon.src = source;
+    else icon.removeAttribute('src');
   },
   () => achievements.unlock(3),
   tile => achievements.visit(tile),
@@ -88,21 +131,38 @@ function showHealth(life: number) {
 
 function setStatus(message: string) {
   status.textContent = message;
-  // The forms and status can move the canvas without resizing it.
-  world.scale.updateBounds();
+}
+
+function setChatOpen(open: boolean, opener: HTMLElement = chatButton) {
+  if (chatForm.hidden === !open) return;
+  chatForm.hidden = !open;
+  chatButton.setAttribute('aria-expanded', String(open));
+  if (open) {
+    chatOpener = opener;
+    sessionMenu.open = false;
+    chatMessage.focus();
+  }
 }
 
 const connection = createConnection({
   enter(player, door) {
+    const firstEntry = gameHud.hidden;
     playerId = player.id;
     world.enter(player, door);
-    characterForm.hidden = true;
+    entryScreen.hidden = true;
+    gameSurface.inert = false;
     gameHud.hidden = false;
+    if (firstEntry) gameSurface.focus();
     achievements.render();
     achievementNotice.replaceChildren();
-    helpPanel.open = showHelpOnEntry;
-    showHelpOnEntry = false;
+    window.clearTimeout(movementTimer);
+    movementNotice.hidden = !showMoveOnEntry;
+    if (showMoveOnEntry) {
+      movementTimer = window.setTimeout(() => { movementNotice.hidden = true; }, 6500);
+      showMoveOnEntry = false;
+    }
     showHealth(player.alive === false ? 0 : 100);
+    window.clearTimeout(lootTimer);
     lootNotice.value = '';
     lootNotice.hidden = true;
     setStatus('');
@@ -129,8 +189,10 @@ const connection = createConnection({
       world.playSound('noloot');
     }
     if (notices.length) {
-      lootNotice.hidden = false;
       lootNotice.value = notices.join(' ');
+      lootNotice.hidden = false;
+      window.clearTimeout(lootTimer);
+      lootTimer = window.setTimeout(() => { lootNotice.hidden = true; }, 5000);
     }
   },
   reset: tile => world.reset(tile),
@@ -142,12 +204,16 @@ const connection = createConnection({
   error(message) {
     playerId = undefined;
     world.leave();
+    sessionMenu.open = false;
+    setChatOpen(false);
     gameHud.hidden = true;
-    characterForm.hidden = false;
+    gameSurface.inert = true;
+    entryScreen.hidden = false;
     showCharacterForm();
     playButton.disabled = false;
     resetButton.disabled = false;
     setStatus(message);
+    playButton.focus();
   },
 });
 
@@ -208,7 +274,7 @@ characterForm.addEventListener('submit', (event) => {
   }
   playButton.disabled = true;
   resetButton.disabled = true;
-  showHelpOnEntry = !saved;
+  showMoveOnEntry = !saved;
   setStatus('Connecting…');
   connection.play(saved ? undefined : name);
 });
@@ -228,11 +294,29 @@ chatForm.addEventListener('submit', async (event) => {
   if (chatMessage.value.trim() === text) chatMessage.value = '';
 });
 
+chatButton.addEventListener('click', () => {
+  setChatOpen(chatForm.hidden === true);
+  if (chatForm.hidden) chatButton.focus();
+});
+
+sessionMenu.addEventListener('toggle', () => {
+  if (sessionMenu.open) setChatOpen(false);
+});
+
 document.addEventListener('keydown', (event) => {
-  if (!gameHud.hidden && event.key === 'Enter' &&
-      (event.target === document.body || event.target instanceof HTMLCanvasElement)) {
+  if (gameHud.hidden || event.defaultPrevented || event.isComposing) return;
+  if (event.key === 'Enter' &&
+      (event.target === gameSurface || event.target === document.body || event.target instanceof HTMLCanvasElement)) {
     event.preventDefault();
-    chatMessage.focus();
+    setChatOpen(true, gameSurface);
+  } else if (event.key === 'Escape' && !chatForm.hidden) {
+    event.preventDefault();
+    setChatOpen(false);
+    chatOpener.focus();
+  } else if (event.key === 'Escape' && sessionMenu.open) {
+    event.preventDefault();
+    sessionMenu.open = false;
+    menuButton.focus();
   }
 });
 
@@ -243,6 +327,7 @@ new Phaser.Game({
   height: 500,
   pixelArt: true,
   backgroundColor: '#1f1a13',
-  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+  input: { windowEvents: false },
+  scale: { mode: Phaser.Scale.RESIZE },
   scene: world,
 });

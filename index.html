@@ -2,66 +2,89 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Phaser Quest</title>
   <link rel="stylesheet" href="/src/preview.css">
 </head>
 <body>
-  <main class="game-page">
-    <header class="game-header">
-      <h1>Phaser Quest</h1>
-    </header>
-
-    <form id="character-form" class="character-form" aria-label="Choose a character">
-      <div class="character-field">
-        <label id="character-label" for="character-name">Character name</label>
-        <input id="character-name" name="character" required maxlength="20" autocomplete="off" spellcheck="false">
+  <main id="game-page" class="game-page">
+    <div id="phaser4-game" role="region" aria-label="Game world" tabindex="0" inert></div>
+    <div id="entry-screen" class="entry-screen">
+      <div class="entry-panel">
+        <h1>Phaser Quest</h1>
+        <form id="character-form" class="character-form" aria-label="Choose a character">
+          <div class="character-field">
+            <label for="character-name">Character name</label>
+            <input id="character-name" name="character" required maxlength="20" autocomplete="off" spellcheck="false">
+          </div>
+          <button id="play-button" class="primary-button" type="submit" disabled>Play</button>
+          <button id="reset-button" class="text-button" type="button" hidden disabled>Reset character</button>
+        </form>
       </div>
-      <button id="play-button" type="submit" disabled>Play</button>
-      <button id="reset-button" type="button" hidden disabled>Reset character</button>
-    </form>
+    </div>
 
     <dialog id="reset-dialog" aria-labelledby="reset-title" aria-describedby="reset-warning">
       <h2 id="reset-title">Reset your character?</h2>
       <p id="reset-warning"></p>
       <p id="reset-status" role="status"></p>
-      <button id="cancel-reset" type="button" autofocus>Cancel</button>
-      <button id="confirm-reset" type="button">Delete character</button>
+      <div class="dialog-actions">
+        <button id="cancel-reset" type="button" autofocus>Cancel</button>
+        <button id="confirm-reset" class="danger-button" type="button">Delete character</button>
+      </div>
     </dialog>
 
     <p id="status" role="status"></p>
-    <div id="phaser4-game" role="region" aria-label="Game world"></div>
 
     <section id="game-hud" class="game-hud" aria-label="Player controls" hidden>
-      <dl class="game-stats">
-        <div><dt>Health</dt><dd><meter id="health-meter" aria-label="Health" min="0" max="100" value="100"></meter> <span id="hero-health">100</span></dd></div>
-        <div><dt>Players</dt><dd id="players-online">0</dd></div>
-      </dl>
-      <dl class="game-stats">
-        <div><dt>Armor</dt><dd id="hero-armor">Cloth Armor</dd></div>
-        <div><dt>Weapon</dt><dd id="hero-weapon">Sword 1</dd></div>
-      </dl>
-      <button id="revive-button" type="button" hidden>Revive</button>
-
-      <form id="chat-form" class="chat-form">
-        <label for="chat-message">Chat</label>
-        <input id="chat-message" name="message" required maxlength="300" autocomplete="off" enterkeyhint="send" placeholder="Message nearby players">
-        <button type="submit">Send</button>
-      </form>
-      <output id="loot-notice" hidden></output>
-      <div class="session-controls">
-        <details id="help-panel" name="guide">
-          <summary>How to play</summary>
-          <ul id="help-text"></ul>
-        </details>
-        <details id="achievements-panel" name="guide">
-          <summary>Achievements</summary>
-          <p id="achievements-count"></p>
-          <ul id="achievements-list"></ul>
-        </details>
-        <button id="sound-button" type="button" aria-pressed="true">Sound on</button>
+      <div class="hero-panel">
+        <div class="health">
+          <label for="health-meter">Health</label>
+          <span id="hero-health">100</span>
+          <meter id="health-meter" min="0" max="100" value="100"></meter>
+        </div>
+        <dl class="equipment">
+          <div>
+            <dt>Weapon</dt>
+            <dd><img id="hero-weapon-icon" alt="" hidden><span id="hero-weapon">Sword 1</span></dd>
+          </div>
+          <div>
+            <dt>Armor</dt>
+            <dd><img id="hero-armor-icon" alt="" hidden><span id="hero-armor">Cloth Armor</span></dd>
+          </div>
+        </dl>
+        <button id="revive-button" class="primary-button" type="button" hidden>Revive</button>
       </div>
-      <div id="achievement-notice" role="log" aria-label="Recent achievements"></div>
+
+      <div class="game-notices">
+        <p id="movement-notice" role="status" hidden></p>
+        <output id="loot-notice" hidden></output>
+        <div id="achievement-notice" role="log" aria-label="Recent achievements"></div>
+      </div>
+
+      <div class="play-controls">
+        <button id="chat-button" type="button" aria-expanded="false" aria-controls="chat-form">Chat</button>
+        <form id="chat-form" class="chat-form" hidden>
+          <label class="visually-hidden" for="chat-message">Chat</label>
+          <input id="chat-message" name="message" required maxlength="300" autocomplete="off" enterkeyhint="send" placeholder="Message nearby players">
+          <button class="primary-button" type="submit">Send</button>
+        </form>
+        <details id="session-menu" class="session-menu">
+          <summary id="menu-button">Menu</summary>
+          <div class="session-controls">
+            <dl class="player-count"><dt>Players online</dt><dd id="players-online">0</dd></dl>
+            <details id="help-panel" name="guide">
+              <summary>How to play</summary>
+              <ul id="help-text"></ul>
+            </details>
+            <details id="achievements-panel" name="guide">
+              <summary>Achievements</summary>
+              <p id="achievements-count"></p>
+              <ul id="achievements-list"></ul>
+            </details>
+            <button id="sound-button" class="text-button" type="button" aria-pressed="true">Sound on</button>
+          </div>
+        </details>
+      </div>
     </section>
   </main>
   <script type="module" src="/src/main.ts"></script>

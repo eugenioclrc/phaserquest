@@ -63,7 +63,8 @@ class Player extends MovingEntity {
     this.name = document.name;
     this.setAOI();
     this.equip(1, document.weapon);
-    this.equip(2, document.armor);
+    // Older saves could write the burger key for Firefox armor because they shared an ID.
+    this.equip(2, document.armor === 'item-burger' ? 'firefox' : document.armor);
   }
 
   getIndividualUpdatePackage() {

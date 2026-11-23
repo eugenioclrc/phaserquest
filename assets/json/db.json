@@ -244,7 +244,7 @@
       "msg": "You drank a health potion!"
     },
     "firefox": {
-      "id": 103,
+      "id": 104,
       "key": "firefox",
       "icon": "item-leatherarmor",
       "frames" : {
