@@ -7,8 +7,12 @@ import express = require('express');
 import mongoDriver = require('mongodb');
 import characters = require('./js/server/CharacterStore.ts');
 import gs = require('./js/server/GameServer.ts');
+import core = require('@colyseus/core');
+import game = require('./js/server/createGameServer.ts');
+import WorldRoom = require('./js/server/WorldRoom.ts');
 import Player = require('./js/server/Player.ts');
 import type { CharacterDocument } from './js/server/WorldTypes.ts';
+import type { ErrorRequestHandler } from 'express';
 import type { ViteDevServer } from 'vite';
 
 // PM2's V8 compatibility probes scan the Bun heap on each metrics refresh.
@@ -28,9 +32,37 @@ const { values: options } = parseArgs({
   },
 });
 
+const proxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+if (!Number.isSafeInteger(proxyHops) || proxyHops < 0) {
+  throw new Error('TRUST_PROXY_HOPS must be a nonnegative integer.');
+}
 const app = express();
+app.set('trust proxy', proxyHops);
 const server = createServer(app);
-app.use('/api/characters', express.json({ limit: '4kb' }));
+// shortcut: limits are local to this process, share counters if the app runs on multiple instances.
+const characterRequests = new Map<string, number>();
+let characterWindowEnd = 0;
+app.post(['/api/characters', '/api/characters/delete'], (req, res, next) => {
+  const now = Date.now();
+  if (now >= characterWindowEnd) {
+    characterRequests.clear();
+    characterWindowEnd = now + 60_000;
+  }
+  const ip = req.ip ?? req.socket.remoteAddress ?? '';
+  const count = characterRequests.get(ip) ?? 0;
+  if (count >= 20) {
+    res.set('Retry-After', String(Math.ceil((characterWindowEnd - now) / 1000))).sendStatus(429);
+    return;
+  }
+  characterRequests.set(ip, count + 1);
+  next();
+}, express.json({ limit: '4kb' }));
+const characterBodyError: ErrorRequestHandler = (error, _req, res, next) => {
+  const status = error.status;
+  if (typeof status !== 'number' || status < 400 || status >= 500) return next(error);
+  res.status(status).type('text').send(http.STATUS_CODES[status]);
+};
+app.use('/api/characters', characterBodyError);
 app.post('/api/characters', async (req, res) => {
   const body: { id?: unknown; name?: unknown } | null | undefined = req.body;
   const name = typeof body?.name === 'string' ? body.name.trim() : '';
@@ -75,6 +107,7 @@ async function start() {
 
   const mongo = new MongoClient(process.env.MONGODB_URI || 'mongodb://127.0.0.1:' + options.mongoPort, {
     serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 5000,
   });
   await mongo.connect();
   gs.characters = new CharacterStore(mongo.db(process.env.MONGODB_DB || 'phaserQuest').collection<CharacterDocument>('players'));
@@ -90,17 +123,14 @@ async function start() {
   }
 
   await gs.readMap();
-  const { defineRoom, matchMaker } = await import('@colyseus/core');
-  const { createGameServer } = await import('./js/server/createGameServer.ts');
-  const { WorldRoom } = await import('./js/server/WorldRoom.ts');
-  const gameServer = createGameServer(server, { world: defineRoom(WorldRoom) });
+  const gameServer = game.createGameServer(server, { world: core.defineRoom(WorldRoom) });
   gameServer.onBeforeShutdown(async () => {
     await vite?.close();
   });
   const port = Number(options.port ?? process.env.PORT ?? 8081);
   const host = process.env.HOST || (options.dev ? '127.0.0.1' : undefined);
   await gameServer.listen(port, host);
-  await matchMaker.createRoom('world', {});
+  await core.matchMaker.createRoom('world', {});
   const address = server.address();
   if (address && typeof address !== 'string') {
     console.log('PhaserQuest listening at http://' + (host || 'localhost') + ':' + address.port);
@@ -108,8 +138,12 @@ async function start() {
 
   let stopping = false;
   async function shutdown() {
-    if (stopping) return;
+    if (stopping) process.exit(1);
     stopping = true;
+    setTimeout(() => {
+      console.error('PhaserQuest shutdown timed out.');
+      process.exit(1);
+    }, 20_000);
     try {
       await gameServer.gracefullyShutdown(false);
     } finally {

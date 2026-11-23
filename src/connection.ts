@@ -1,9 +1,9 @@
 import { Callbacks, Client, type Room } from '@colyseus/sdk';
-import { CharacterJoinError, type MovementCorrection } from '../shared/WorldProtocol.ts';
+import { CharacterJoinError, chatCooldownMs, maxPathLength, type MovementCorrection } from '../shared/WorldProtocol.ts';
 import type { ItemSnapshot, MonsterSnapshot, PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
 
-import type { WorldRoom } from '../js/server/WorldRoom.ts';
-import type { ItemState, MonsterState, PlayerState } from '../js/server/WorldState.ts';
+import type WorldRoom from '../js/server/WorldRoom.ts';
+import type { ItemState, MonsterState, PlayerState } from '../js/server/WorldTypes.ts';
 
 function playerSnapshot(row: PlayerState, serverNow: number): PlayerSnapshot {
   const { id, name, x, y, aoi, armor, weapon, alive, inFight, targetID, routeVersion } = row;
@@ -95,6 +95,7 @@ export function createConnection(events: ConnectionEvents) {
   let entered = false;
   let deleting = false;
   let creating = false;
+  let nextChatAt = 0;
 
   function sendAction(send: (active: Room<WorldRoom>) => void): boolean {
     if (!entered || !room?.connection.isOpen) return false;
@@ -121,6 +122,7 @@ export function createConnection(events: ConnectionEvents) {
       next.reconnection.minUptime = 0;
       next.reconnection.maxEnqueuedMessages = 0;
       let dropped = false;
+      let entryTimer: number | undefined;
       let lastServerOffset = 0;
       let heroPosition: Tile | undefined;
       const snapshot = (player: PlayerState) => playerSnapshot(player, Date.now() + lastServerOffset);
@@ -171,6 +173,7 @@ export function createConnection(events: ConnectionEvents) {
         if (!entered) {
           const player = state.players?.get(String(self.playerId));
           if (!player || !heroPosition) return;
+          window.clearTimeout(entryTimer);
           const door = self.doorX >= 0 && self.doorY >= 0 ? { x: self.doorX, y: self.doorY } : undefined;
           events.enter({ ...snapshot(player), ...heroPosition }, door);
           worldUpdate = {
@@ -190,12 +193,14 @@ export function createConnection(events: ConnectionEvents) {
         if (room !== next) return;
         heroPosition = undefined;
         sessionStorage.setItem(key, next.reconnectionToken);
+        entryTimer = window.setTimeout(() => failEntry(CharacterJoinError.unavailable), 30000);
         next.send('ready');
         flush();
       }
 
       next.onStateChange(flush);
       next.onDrop(() => {
+        window.clearTimeout(entryTimer);
         dropped = true;
         entered = false;
         events.pending('Connection lost. Reconnecting…');
@@ -206,6 +211,7 @@ export function createConnection(events: ConnectionEvents) {
         queueMicrotask(ready);
       });
       next.onLeave(() => {
+        window.clearTimeout(entryTimer);
         for (const dispose of unbind.values()) dispose();
         unbind.clear();
         if (room !== next) return;
@@ -218,8 +224,9 @@ export function createConnection(events: ConnectionEvents) {
           events.error('Lost the connection to the game. Try again.');
         }
       });
-      next.onMessage('entryError', (code: number) => {
+      function failEntry(code: number) {
         if (room !== next) return;
+        window.clearTimeout(entryTimer);
         room = undefined;
         characterId = undefined;
         entered = false;
@@ -227,17 +234,17 @@ export function createConnection(events: ConnectionEvents) {
         if (code === CharacterJoinError.missing) clearCharacter(id);
         events.error(characterMessage(code));
         void next.leave();
-      });
-      function pong(stamp: number) {
+      }
+      next.onMessage('entryError', failEntry);
+      function syncClock(stamp: number) {
         lastServerOffset = stamp - Date.now();
-        next.send('ponq', stamp);
       }
       next.onMessage('ready', ({ x, y, stamp }: Tile & { stamp: number }) => {
         heroPosition = { x, y };
-        pong(stamp);
+        syncClock(stamp);
         flush();
       });
-      next.onMessage('ping', pong);
+      next.onMessage('ping', syncClock);
       next.onMessage('revived', (tile: Tile) => { if (room === next && entered) events.updateSelf(tile); });
       next.onMessage('playerEvents', (update: PersonalUpdate) => { if (room === next && entered) events.updateSelf(update); });
       next.onMessage('reset', (correction: MovementCorrection | null) => {
@@ -296,15 +303,20 @@ export function createConnection(events: ConnectionEvents) {
       await join(characterId);
     },
     move(path: Tile[], orientation: number, action: PathAction = { action: 0 }): boolean {
-      if (path.length < (action.action === 0 ? 2 : 1) || path.length > 60) return false;
+      if (path.length < (action.action === 0 ? 2 : 1) || path.length > maxPathLength) return false;
       return sendAction(active => active.send('path', { path, action, or: orientation }));
     },
     revive(): boolean {
       return sendAction(active => active.send('revive'));
     },
-    chat(text: string): boolean {
-      if (!text.trim() || text.length > 300) return false;
-      return sendAction(active => active.send('chat', text));
+    async chat(text: string): Promise<boolean> {
+      const now = Date.now();
+      if (now < nextChatAt || !text.trim() || text.length > 300) return false;
+      const active = room;
+      if (!entered || !active?.connection.isOpen) return false;
+      nextChatAt = now + chatCooldownMs;
+      const delivered = await active.request('chat', text).catch(() => false);
+      return delivered && room === active && entered;
     },
   };
 }

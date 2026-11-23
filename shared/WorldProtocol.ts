@@ -1,4 +1,7 @@
+export const maxClickDistance = 28;
+export const maxPathLength = 60;
 export const playerStepMs = 120;
+export const chatCooldownMs = 1000;
 
 export interface Tile {
   x: number;
@@ -14,7 +17,8 @@ export interface PathCommand {
 }
 
 export interface MovementCorrection extends Tile {
-  route?: { path: Tile[]; orientation: number };
+  teleport?: true;
+  route?: { path: Tile[]; orientation: number; elapsed?: number };
 }
 
 export const CharacterJoinError = {

@@ -17,6 +17,7 @@ class Player extends MovingEntity {
   armor!: number;
   lastSavedPosition!: Tile;
   lastDoor?: Tile;
+  lastOutdoorPosition?: Tile;
   updatePacket = new PersonalUpdatePacket();
 
   constructor(world: typeof GameServer, name = '') {
@@ -122,7 +123,7 @@ class Player extends MovingEntity {
       }
       if (picked) {
         if (type === 1 || type === 2) this.equip(type, itemInfo.equip);
-        if (this.x < 92) this.world.savePlayer(this);
+        if (!this.lastOutdoorPosition) this.world.savePlayer(this);
         this.updatePacket.addUsed(equipInfo.id);
       }
     }
@@ -131,6 +132,8 @@ class Player extends MovingEntity {
 
   teleport(door: Door) {
     this.lastDoor = { x: this.x, y: this.y };
+    if (door.camera) this.lastOutdoorPosition ??= this.lastDoor;
+    else this.lastOutdoorPosition = undefined;
     this.x = door.to.x;
     this.y = door.to.y;
     this.updatePacket.teleport = { x: this.x, y: this.y };
@@ -141,6 +144,7 @@ class Player extends MovingEntity {
   revive() {
     if (this.alive) return;
     this.lastDoor = undefined;
+    this.lastOutdoorPosition = undefined;
     this.respawnAt(this.lastSavedPosition.x, this.lastSavedPosition.y);
     this.updatePacket.updatePosition(this.x, this.y);
   }

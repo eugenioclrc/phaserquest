@@ -2,16 +2,18 @@ import { expect, test } from 'bun:test';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Client } from '@colyseus/sdk';
-import { defineRoom, matchMaker } from '@colyseus/core';
+import core = require('@colyseus/core');
 import { ObjectId } from 'mongodb';
 import express from 'express';
-import { WorldRoom } from '../js/server/WorldRoom.ts';
+import WorldRoom from '../js/server/WorldRoom.ts';
 import { createGameServer } from '../js/server/createGameServer.ts';
 import { CharacterStore } from '../js/server/CharacterStore.ts';
 import { characterCollection } from './character-collection.ts';
 
 import GameServer = require('../js/server/GameServer.ts');
 import Item = require('../js/server/Item.ts');
+
+const { defineRoom, matchMaker } = core;
 
 async function until(ready: () => boolean) {
   const end = Date.now() + 1500;
@@ -29,6 +31,7 @@ test('state contains only nearby avatars and the local character health', async 
       if (index < 0) return null;
       return { _id, name: 'Scout' + index, x: index === 2 ? 99 : 12 + index, y: 12, weapon: 'sword1', armor: 'clotharmor' };
     },
+    updateOne: async () => ({ matchedCount: 1 }),
   }));
   await GameServer.readMap();
   const http = createServer(express());

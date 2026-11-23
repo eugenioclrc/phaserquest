@@ -1,5 +1,13 @@
+import type { WorldState } from './WorldState.ts';
+import type { SchemaType } from '@colyseus/schema';
 import type { ObjectId } from 'mongodb';
 import type { Tile } from '../../shared/WorldProtocol.ts';
+
+export type ReplicatedWorld = SchemaType<typeof WorldState>;
+export type PlayerState = NonNullable<ReturnType<ReplicatedWorld['players']['get']>>;
+export type MonsterState = NonNullable<ReturnType<ReplicatedWorld['monsters']['get']>>;
+export type ItemState = NonNullable<ReturnType<ReplicatedWorld['items']['get']>>;
+export type VisibleEntity = PlayerState | MonsterState | ItemState;
 
 export interface CharacterSave extends Tile {
   name: string;

@@ -1,7 +1,9 @@
-import { ArraySchema, schema, t, type SchemaType } from '@colyseus/schema';
+import colyseus = require('@colyseus/schema');
+import type { SchemaType } from '@colyseus/schema';
 import type GameObject = require('./GameObject.ts');
 import type Player = require('./Player.ts');
 
+const { ArraySchema, schema, t } = colyseus;
 const Position = schema({ x: t.uint16(), y: t.uint16() }, 'Position');
 const PlayerState = schema({
   id: t.uint32(),
@@ -51,14 +53,14 @@ const ItemState = schema({
   loot: t.boolean(),
 }, 'ItemState');
 
-export const SelfState = schema({
+const SelfState = schema({
   playerId: t.uint32(),
   life: t.uint8(),
   doorX: t.int16().default(-1),
   doorY: t.int16().default(-1),
 }, 'SelfState');
 
-export const WorldState = schema({
+const WorldState = schema({
   online: t.uint32().default(0),
   players: t.map(PlayerState).view(),
   monsters: t.map(MonsterState).view(),
@@ -66,12 +68,7 @@ export const WorldState = schema({
   self: t.map(SelfState).view(),
 }, 'WorldState');
 
-export type WorldState = SchemaType<typeof WorldState>;
-export type PlayerState = SchemaType<typeof PlayerState>;
-export type MonsterState = SchemaType<typeof MonsterState>;
-export type ItemState = SchemaType<typeof ItemState>;
-export type VisibleEntity = PlayerState | MonsterState | ItemState;
-
+type WorldState = SchemaType<typeof WorldState>;
 function syncPlayer(state: WorldState, player: Player) {
   const key = String(player.id);
   const row = state.players.get(key) ?? new PlayerState();
@@ -105,9 +102,9 @@ function syncPlayer(state: WorldState, player: Player) {
   if (!state.players.has(key)) state.players.set(key, row);
 }
 
-export const entityCollection = { player: 'players', monster: 'monsters', item: 'items' } as const;
+const entityCollection = { player: 'players', monster: 'monsters', item: 'items' } as const;
 
-export function syncEntity(state: WorldState, entity: GameObject) {
+function syncEntity(state: WorldState, entity: GameObject) {
   if (entity.isPlayer()) {
     syncPlayer(state, entity);
     return;
@@ -153,3 +150,5 @@ export function syncEntity(state: WorldState, entity: GameObject) {
   });
   if (!state.items.has(key)) state.items.set(key, row);
 }
+
+export = { SelfState, WorldState, entityCollection, syncEntity };

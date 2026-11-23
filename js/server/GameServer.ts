@@ -2,7 +2,7 @@ import fs = require('node:fs');
 import path = require('node:path');
 import PF = require('pathfinding');
 import choose = require('random-weighted-choice');
-import spatial = require('../../shared/spaceMap.ts');
+import spatial = require('../../shared/SpaceMap.ts');
 import spatialAreas = require('../../shared/AOIutils.ts');
 import AOI = require('./AOI.ts');
 import ChestArea = require('./ChestArea.ts');
@@ -12,14 +12,17 @@ import Item = require('./Item.ts');
 import Monster = require('./Monster.ts');
 import type MovingEntity = require('./MovingEntity.ts');
 import Player = require('./Player.ts');
+import protocol = require('../../shared/WorldProtocol.ts');
 import type { MovementCorrection, PathCommand, Tile } from '../../shared/WorldProtocol.ts';
 import type {
   ChestContents, Door, EntityDefinition, ItemDefinition, LootChoice, MonsterDefinition, TiledMap, TiledObject,
 } from './WorldTypes.ts';
 
-const { spaceMap } = spatial;
+const { SpaceMap } = spatial;
 const { AOIutils } = spatialAreas;
 const assetsDir = path.join(__dirname, '..', '..', 'assets');
+const { maxClickDistance, maxPathLength } = protocol;
+const clickOffsets = [[0, 0], [-1, 0], [0, -1], [1, 0], [0, 1]];
 
 class GameSimulation {
   readonly changedEntities = new Set<GameObject>();
@@ -53,14 +56,14 @@ class GameSimulation {
   layers: number[][] = [];
   tilesets: Record<string, Record<number, Record<string, unknown>>> = {};
   AOIs: Record<number, AOI> = {};
-  AOIfromTiles = new spaceMap<AOI>();
+  aoiFromTiles = new SpaceMap<AOI>();
   collisionGrid: number[][] = [];
   PFgrid!: PF.Grid;
   pathfinder!: PF.AStarFinder;
-  doors = new spaceMap<Door>();
-  playersMap = new spaceMap<Player>();
-  items = new spaceMap<Item>();
-  monsters = new spaceMap<Monster>();
+  doors = new SpaceMap<Door>();
+  playersMap = new SpaceMap<Player>();
+  items = new SpaceMap<Item>();
+  monsters = new SpaceMap<Monster>();
   monstersTable: Record<number, Monster> = {};
 
   getPlayer(sessionId: string): Player | undefined {
@@ -115,7 +118,7 @@ class GameSimulation {
     AOIutils.nbAOIhorizontal = Math.ceil(this.map.width / tileWidth);
     AOIutils.lastAOIid = 0;
     this.AOIs = {};
-    this.AOIfromTiles = new spaceMap<AOI>();
+    this.aoiFromTiles = new SpaceMap<AOI>();
     this.collisionGrid = [];
     for (let y = 0; y < this.map.height; y++) {
       const col = [];
@@ -124,7 +127,7 @@ class GameSimulation {
           const area = new AOI(x, y, tileWidth, tileHeight);
           this.AOIs[area.id] = area;
         }
-        this.AOIfromTiles.add(x, y, this.AOIs[AOIutils.idFromCoords(x, y)]);
+        this.aoiFromTiles.add(x, y, this.AOIs[AOIutils.idFromCoords(x, y)]);
 
         // The tileset marks blocked tiles with the "c" property.
         let collide = false;
@@ -142,11 +145,10 @@ class GameSimulation {
       }
       this.collisionGrid.push(col);
     }
-    this.PFgrid = new PF.Grid(this.collisionGrid);
-    this.pathfinder = new PF.AStarFinder();
-
     this.setUpDoors();
     this.setUpEntities();
+    this.PFgrid = new PF.Grid(this.collisionGrid);
+    this.pathfinder = new PF.AStarFinder();
     this.setUpChests();
     this.setUpRoaming();
     console.log('Map read');
@@ -154,7 +156,7 @@ class GameSimulation {
   }
 
   setUpDoors() { // Set up teleports
-    this.doors = new spaceMap<Door>();
+    this.doors = new SpaceMap<Door>();
     for (let d = 0; d < this.objects.doors.length; d++) {
       const door = this.objects.doors[d];
       const position = this.computeTileCoords(door.x, door.y);
@@ -169,9 +171,9 @@ class GameSimulation {
   }
 
   setUpEntities() { // Set up monsters & items
-    this.playersMap = new spaceMap<Player>();
-    this.items = new spaceMap<Item>();
-    this.monsters = new spaceMap<Monster>();
+    this.playersMap = new SpaceMap<Player>();
+    this.items = new SpaceMap<Item>();
+    this.monsters = new SpaceMap<Monster>();
     this.monstersTable = {};
     for (let d = 0; d < this.objects.entities.length; d++) {
       const entity = this.objects.entities[d];
@@ -191,8 +193,6 @@ class GameSimulation {
   }
 
   addMonster(position: Tile, sprite: string) { // Create a monster object and add it to all relevant data structures
-      // position are the tile coordinates at which to create the monster
-      // sprite is the name of the sprite of the monster, which also works as its string key in the JSON
     const definition = this.db.monsters[sprite];
     if (!definition) {
       console.error(`WARNING : undefined data for monster : ${sprite}`);
@@ -233,15 +233,22 @@ class GameSimulation {
   setUpRoaming() { // Sets up packs of randomly positioned monsters within an area
     for (let d = 0; d < this.objects.roaming.length; d++) {
       const roaming = this.objects.roaming[d];
-      const positions = new Set<Tile>(); // use a set of positions to avoid having multiple monsters on the same tile
-      while (positions.size < Number(roaming.properties.nb)) {
-        const x = this.randomInt(roaming.x, (roaming.x + roaming.width));
-        const y = this.randomInt(roaming.y, (roaming.y + roaming.height));
-        positions.add(this.computeTileCoords(x, y));
+      const { tilewidth, tileheight } = this.map;
+      const endX = Math.ceil((roaming.x + roaming.width) / tilewidth);
+      const endY = Math.ceil((roaming.y + roaming.height) / tileheight);
+      const positions: Tile[] = [];
+      for (let y = Math.floor(roaming.y / tileheight); y < endY; y++) {
+        for (let x = Math.floor(roaming.x / tilewidth); x < endX; x++) {
+          if (this.collisionGrid[y]?.[x] === 0 && !this.monsters.getFirst(x, y)) positions.push({ x, y });
+        }
       }
-      positions.forEach((pos) => {
-        this.addMonster(pos, roaming.type);
-      });
+      for (let i = 0; i < Number(roaming.properties.nb) && positions.length; i++) {
+        const index = this.randomInt(0, positions.length);
+        const position = positions[index];
+        positions[index] = positions[positions.length - 1];
+        positions.pop();
+        this.addMonster(position, roaming.type);
+      }
     }
   }
 
@@ -266,7 +273,7 @@ class GameSimulation {
   }
 
   embedPlayer(player: Player) {
-      // Add the player to all the relevant data structures
+    // Add the player to all the relevant data structures
     this.players[player.id] = player;
     this.addAtLocation(player);
     player.setLastSavedPosition();
@@ -282,18 +289,19 @@ class GameSimulation {
   async removePlayer(sessionId: string): Promise<void> {
     const player = this.getPlayer(sessionId);
     if (!player) return;
+    const { x, y } = player.alive ? player.lastOutdoorPosition ?? player : player.lastSavedPosition;
     this.removeFromLocation(player);
     player.die();
     delete this.players[player.id];
     delete this.sessionMap[sessionId];
-    await this.characters.close(player.getMongoID());
+    await this.characters.close(player.getMongoID(), { ...player.dbTrim(), x, y });
   }
 
   // ==================================
   // Code related to managing the position of the game objects in the world
 
-  getSpaceMap(entity: GameObject): spatial.spaceMap<GameObject> {
-      // Get the spatial data structure corresponding to the kind of entity  you want to deal with
+  getSpaceMap(entity: GameObject): spatial.SpaceMap<GameObject> {
+    // Get the spatial data structure corresponding to the kind of entity  you want to deal with
     switch (entity.category) {
       case 'item':
         return this.items;
@@ -305,13 +313,13 @@ class GameSimulation {
   }
 
   areaAt(x: number, y: number): AOI {
-    const area = this.AOIfromTiles.getFirst(x, y);
+    const area = this.aoiFromTiles.getFirst(x, y);
     if (!area) throw new RangeError(`No area of interest at ${x}, ${y}`);
     return area;
   }
 
   addAtLocation(entity: GameObject) {
-      // Add some entity to all the data structures related to position (i.e. the spaceMap of the category of the entity, and the AOI)
+    // Add some entity to all the data structures related to position (i.e. the SpaceMap of the category of the entity, and the AOI)
     const map = this.getSpaceMap(entity);
     map.add(entity.x, entity.y, entity);
     const area = this.areaAt(entity.x, entity.y);
@@ -322,23 +330,23 @@ class GameSimulation {
   }
 
   moveAtLocation(entity: GameObject, fromX: number, fromY: number, toX: number, toY: number) {
-      // Update the position of an entity in all data structures related to position (spaceMap and AOI)
+    // Update the position of an entity in all data structures related to position (SpaceMap and AOI)
     const map = this.getSpaceMap(entity);
     map.move(fromX, fromY, toX, toY, entity);
     this.changedEntities.add(entity);
-    const AOIfrom = this.areaAt(fromX, fromY);
-    const AOIto = this.areaAt(entity.x, entity.y);
-    if (AOIfrom.id != AOIto.id) {
-      this.changedAreas.add(AOIfrom.id);
-      this.changedAreas.add(AOIto.id);
-      entity.setProperty('aoi', AOIto.id);
-      AOIfrom.deleteEntity(entity);
-      AOIto.addEntity(entity);
+    const aoiFrom = this.areaAt(fromX, fromY);
+    const aoiTo = this.areaAt(entity.x, entity.y);
+    if (aoiFrom.id != aoiTo.id) {
+      this.changedAreas.add(aoiFrom.id);
+      this.changedAreas.add(aoiTo.id);
+      entity.setProperty('aoi', aoiTo.id);
+      aoiFrom.deleteEntity(entity);
+      aoiTo.addEntity(entity);
     }
   }
 
   removeFromLocation(entity: GameObject) {
-      // Remove an entity from all data structures related to position (spaceMap and AOI)
+    // Remove an entity from all data structures related to position (SpaceMap and AOI)
     const map = this.getSpaceMap(entity);
     map.delete(entity.x, entity.y, entity);
     const area = this.areaAt(entity.x, entity.y);
@@ -349,7 +357,7 @@ class GameSimulation {
   }
 
   determineStartingPosition() {
-      // Determine where a new player should appear for the first time in the game
+    // Determine where a new player should appear for the first time in the game
     const checkpoints = this.objects.checkpoints;
     const startArea = checkpoints[Math.floor(Math.random() * checkpoints.length)];
     const x = this.randomInt(startArea.x, (startArea.x + startArea.width));
@@ -365,24 +373,24 @@ class GameSimulation {
   }
 
   adjacentNoDiagonal(a: Tile, b: Tile) { // Check if two entites a and b are on non-diagonally adjacent tiles
-    const Xdiff = a.x - b.x;
-    const Ydiff = a.y - b.y;
-    if (Xdiff == 1 && Ydiff == 0) {
+    const xDiff = a.x - b.x;
+    const yDiff = a.y - b.y;
+    if (xDiff == 1 && yDiff == 0) {
       return 1;
-    } else if (Xdiff == 0 && Ydiff == 1) {
+    } else if (xDiff == 0 && yDiff == 1) {
       return 2;
-    } else if (Xdiff == -1 && Ydiff == 0) {
+    } else if (xDiff == -1 && yDiff == 0) {
       return 3;
-    } else if (Xdiff == 0 && Ydiff == -1) {
+    } else if (xDiff == 0 && yDiff == -1) {
       return 4;
-    } else if (Xdiff == 0 && Ydiff == 0) { // The two entities are on the same cell
+    } else if (xDiff == 0 && yDiff == 0) { // The two entities are on the same cell
       return -1;
     } // The two entities are not on adjacent cells, nor on the same one
     return 0;
   }
 
   findFreeAdjacentCell(x: number, y: number): Tile | undefined {
-      // When two entities are on the same tile, look for the first free adjacent tile to move one to
+    // When two entities are on the same tile, look for the first free adjacent tile to move one to
     const adj = [[-1, 0], [1, -1], [1, 1], [-1, 1]];
     for (let c = 0; c < 4; c++) {
       x += adj[c][0];
@@ -401,40 +409,50 @@ class GameSimulation {
     const path = route.path.slice(route.step);
     if (path[0]?.x !== position.x || path[0]?.y !== position.y) path.unshift(position);
     if (path.length < 2) return position;
-    return { ...position, route: { path, orientation: route.orientation } };
+    const elapsed = Math.max(0, Date.now() - route.departureTime - route.step * player.speed);
+    return { ...position, route: { path, orientation: route.orientation, elapsed } };
   }
 
-  handlePath(sessionId: string, command: unknown, latencyMs: number) {
+  handlePath(sessionId: string, command: unknown) {
     const player = this.getPlayer(sessionId);
     if (!player?.alive || !command || typeof command !== 'object') return false;
 
-    const { path, action, or: orientation } = command as Partial<PathCommand>;
+    const { path: requested, action, or: orientation } = command as Partial<PathCommand>;
     if (!action || ![0, 3, 4].includes(action.action)) return false;
     if (typeof orientation !== 'number' || !Number.isInteger(orientation) || orientation < 1 || orientation > 4) return false;
-    if (!Array.isArray(path) || path.length < (action.action === 0 ? 2 : 1) || path.length > 60) return false;
+    if (!Array.isArray(requested) || requested.length < (action.action === 0 ? 2 : 1) || requested.length > maxPathLength) return false;
 
     const inBounds = (tile: Tile) => tile && Number.isInteger(tile.x) && Number.isInteger(tile.y) &&
       tile.x >= 0 && tile.x < this.map.width && tile.y >= 0 && tile.y < this.map.height;
-    if (!path.every(inBounds) || (action.action === 4 && !inBounds(action))) return false;
+    if (!requested.every(inBounds) || (action.action === 4 && !inBounds(action))) return false;
 
-    const start = path[0];
+    player.updateWalk();
+    if (!player.alive) return false;
+    const active = player.route;
+    const { x, y } = player;
+    const start = requested[0];
+    const path = start.x === x && start.y === y ? requested : [{ x, y }, ...requested];
     const end = path[path.length - 1];
-    if (manhattanDistance(start.x, start.y, end.x, end.y) > AOIutils.tileHeight + 8) return false;
-    if (Math.abs(start.x - player.x) > 1 || Math.abs(start.y - player.y) > 1) return false;
-    if (this.collisionGrid[start.y][start.x] && (start.x !== player.x || start.y !== player.y)) return false;
+    // Attack and chest paths end one step before the clicked tile, facing it.
+    const [dx, dy] = clickOffsets[action.action === 0 ? 0 : orientation];
+    if (manhattanDistance(start.x, start.y, end.x + dx, end.y + dy) > maxClickDistance) return false;
     for (let i = 1; i < path.length; i++) {
       const tile = path[i];
-      if (!this.adjacent(tile, path[i - 1]) || this.collisionGrid[tile.y][tile.x]) return false;
+      if (this.adjacentNoDiagonal(tile, path[i - 1]) <= 0 || this.collisionGrid[tile.y][tile.x]) return false;
     }
 
+    let routeAction = action;
     if (action.action === 3) {
       if (!Number.isSafeInteger(action.id) || action.id < 0) return false;
       const monster = this.monstersTable[action.id];
-      if (!monster?.alive) return false;
-      if (!player.inFight || !player.target?.alive) player.setTarget(monster);
+      if (!monster) return false;
+      if (!monster.alive) routeAction = { action: 0 };
+      else if (!player.inFight || !player.target?.alive) player.setTarget(monster);
     }
-    player.setRoute(path, Date.now() - latencyMs, latencyMs, action, orientation);
-    if (player.inFight && action.action !== 3) player.endFight();
+    // A turn keeps the progress accrued since the last completed tile.
+    const departure = active ? active.departureTime + active.step * player.speed : Date.now();
+    player.setRoute(path, departure, 0, routeAction, orientation);
+    if (routeAction.action !== 3 && (player.inFight || player.target)) player.endFight();
     return true;
   }
 
@@ -443,16 +461,13 @@ class GameSimulation {
   }
 
   respawnCount(x: number, y: number, callback: () => void, delay: number) { // Sets timer to respawn a monster or item
-      // object is the game object to respawn (a monster or an item)
-      // callback is the function that should be call to make it respawn
-      // delay is the amoutn of ms to wait before calling the callback
     this.schedule(() => this.respawnSomething(x, y, callback), delay);
   }
 
   respawnSomething(x: number, y: number, callback: () => void) {
-      // Check if the tile is not occupied by something else ; if it is, retry after a short while
-      // object is the game object to respawn (a monster or an item)
-      // callback is the function that should be call to make it respawn
+    // Check if the tile is not occupied by something else ; if it is, retry after a short while
+    // object is the game object to respawn (a monster or an item)
+    // callback is the function that should be call to make it respawn
     if (this.monsters.getFirstFiltered(x, y, ['alive']) ||
           this.playersMap.getFirstFiltered(x, y, ['alive']) ||
           this.items.getFirstFiltered(x, y, ['visible'])
@@ -488,7 +503,7 @@ class GameSimulation {
     if (action) {
       if (action.action == 3) { // fight
         const monster = this.monstersTable[action.id];
-        if (!monster?.alive || this.adjacentNoDiagonal(player, monster) <= 0) {
+        if (!monster?.alive || manhattanDistance(player.x, player.y, monster.x, monster.y) > maxClickDistance) {
           if (player.target?.id === action.id && (!monster?.alive || !player.inFight)) player.setTarget(null);
           return;
         }
@@ -505,9 +520,8 @@ class GameSimulation {
   }
 
   checkSave(player: Player) {
-      // save the progress of the player if the distance to his last saved position is greater than 30,
-      // but only if he's outdoor (x < 92). Saving position indoor might cause camera issues when reloading the game.
-    if (player.x < 92 && manhattanDistance(player.x, player.y, player.lastSavedPosition.x, player.lastSavedPosition.y) > 30) {
+    if (player.alive && !player.lastOutdoorPosition && manhattanDistance(player.x, player.y, player.lastSavedPosition.x, player.lastSavedPosition.y) > 30 &&
+      !this.characters.hasPendingSave(player.getMongoID())) {
       this.savePlayer(player);
     }
   }
@@ -536,7 +550,7 @@ class GameSimulation {
   }
 
   formatLootTable(table?: Record<string, number>): LootChoice[] | undefined {
-      // Convert the loot information from the JSON in a format that the rwc module will be able to use
+    // Convert the loot information from the JSON in a format that the rwc module will be able to use
     if (!table) return;
     const lootTable: LootChoice[] = [];
     let sum = 0;
@@ -551,11 +565,11 @@ class GameSimulation {
   }
 
   dropLoot(table: LootChoice[] | undefined, x: number, y: number) {
-      // Weighted random selection of what item should be dropped by a monster
+    // Weighted random selection of what item should be dropped by a monster
     const defaultTable = [
-          { weight: 5, id: 'none' },
-          { weight: 4, id: 'item-flask' },
-          { weight: 1, id: 'item-burger' },
+      { weight: 5, id: 'none' },
+      { weight: 4, id: 'item-flask' },
+      { weight: 1, id: 'item-burger' },
     ];
     const lootTable = table || defaultTable;
     const itm = choose(lootTable);

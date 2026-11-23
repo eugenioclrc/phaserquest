@@ -2,10 +2,12 @@ import { expect, test } from 'bun:test';
 import { createServer } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { Client } from '@colyseus/sdk';
-import { Room, defineRoom, matchMaker } from '@colyseus/core';
+import core = require('@colyseus/core');
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { createGameServer } from '../js/server/createGameServer.ts';
+
+const { Room, defineRoom, matchMaker } = core;
 
 class ProbeRoom extends Room {
   autoDispose = false;
@@ -37,7 +39,13 @@ test('Express and Colyseus share a listener with one persistent room', async () 
       hmr!.addEventListener('error', reject, { once: true });
     });
     expect(await hmrReady).toBe('connected');
-    expect(await fetch(endpoint + '/health').then(response => response.text())).toBe('ok');
+    const headers = { Origin: 'https://other.example', 'Access-Control-Request-Method': 'POST' };
+    const health = await fetch(endpoint + '/health', { headers: { Origin: headers.Origin } });
+    expect(await health.text()).toBe('ok');
+    expect(health.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    const preflight = await fetch(endpoint + '/api/characters', { method: 'OPTIONS', headers });
+    expect(preflight.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    expect(preflight.headers.get('Access-Control-Allow-Credentials')).toBeNull();
     await expect(client.join('probe')).rejects.toThrow();
     await expect(client.joinOrCreate('probe')).rejects.toThrow();
 

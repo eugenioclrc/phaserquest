@@ -52,7 +52,7 @@ class Monster extends MovingEntity {
     if (direction > 0) {
       this.damage();
     } else if (end) {
-      this.move(end, true);
+      this.move(end, direction !== -1);
     }
   }
 
@@ -61,9 +61,9 @@ class Monster extends MovingEntity {
     if (!this.inFight && !this.route && (this.x != this.startX || this.y != this.startY)) this.move({ x: this.startX, y: this.startY }, false);
   }
 
-  move(end: Tile, fight: boolean) {
+  move(end: Tile, stopBeforeEnd: boolean) {
     const steps = this.world.pathfinder.findPath(this.x, this.y, end.x, end.y, this.world.PFgrid.clone());
-    if (fight) steps.pop();
+    if (stopBeforeEnd) steps.pop();
     if (!steps.length) return;
 
     const path = steps.map(([x, y]) => ({ x, y }));

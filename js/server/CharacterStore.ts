@@ -29,14 +29,14 @@ function characterId(value: unknown) {
 }
 
 class CharacterStore {
-  private readonly reservations = new Set<string>();
+  private readonly reservations = new Map<string, Promise<void> | null>();
   private readonly saves = new Map<string, Promise<boolean>>();
 
   constructor(private readonly collection: CharacterCollection) {}
 
   private reserve(id: string) {
     if (this.reservations.has(id)) throw new CharacterError('busy');
-    this.reservations.add(id);
+    this.reservations.set(id, null);
   }
 
   async create(value: unknown, save: CharacterSave) {
@@ -56,6 +56,8 @@ class CharacterStore {
 
   async open(value: unknown) {
     const id = characterId(value);
+    const closing = this.reservations.get(id);
+    if (closing) await closing;
     this.reserve(id);
     let document;
     try {
@@ -75,9 +77,10 @@ class CharacterStore {
       await previous;
       try {
         const result = await this.collection.updateOne({ _id: new ObjectId(id) }, { $set: save });
-        return result.matchedCount === 1;
-      } catch {
-        console.error('Could not save character.');
+        if (result.matchedCount !== 1) throw new Error('Character document was not found');
+        return true;
+      } catch (error) {
+        console.error(`Could not save character ending in ${id.slice(-8)}.`, error);
         return false;
       }
     })();
@@ -88,9 +91,15 @@ class CharacterStore {
     return pending;
   }
 
-  async close(id: string) {
-    await this.saves.get(id);
-    this.reservations.delete(id);
+  hasPendingSave(id: string) {
+    return this.saves.has(id);
+  }
+
+  close(id: string, finalSave?: CharacterSave) {
+    const pending = finalSave ? this.save(id, finalSave) : this.saves.get(id);
+    const closing = Promise.resolve(pending).then(() => { this.reservations.delete(id); });
+    this.reservations.set(id, closing);
+    return closing;
   }
 
   async delete(value: unknown) {

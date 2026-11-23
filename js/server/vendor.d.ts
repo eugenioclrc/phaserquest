@@ -2,6 +2,7 @@ declare module 'pathfinding' {
   export class Grid {
     constructor(matrix: number[][]);
     clone(): Grid;
+    isWalkableAt(x: number, y: number): boolean;
   }
 
   export class AStarFinder {

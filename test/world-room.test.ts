@@ -2,16 +2,19 @@ import { expect, test } from 'bun:test';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Client, type Room } from '@colyseus/sdk';
-import { defineRoom, matchMaker } from '@colyseus/core';
+import core = require('@colyseus/core');
 import { ObjectId } from 'mongodb';
 import express from 'express';
 import type { Tile } from '../shared/WorldProtocol.ts';
-import { WorldRoom } from '../js/server/WorldRoom.ts';
+import WorldRoom from '../js/server/WorldRoom.ts';
 import { createGameServer } from '../js/server/createGameServer.ts';
 import { CharacterStore } from '../js/server/CharacterStore.ts';
+import type { CharacterSave } from '../js/server/WorldTypes.ts';
 import { characterCollection } from './character-collection.ts';
 
 import GameServer = require('../js/server/GameServer.ts');
+
+const { defineRoom, matchMaker } = core;
 
 function ready(room: Room<WorldRoom>) {
   const position = Promise.withResolvers<Tile>();
@@ -31,10 +34,18 @@ async function localPlayer(room: Room<WorldRoom>) {
 
 test('world clients share one room, reserve characters and reconnect', async () => {
   const ids = ['100000000000000000000001', '100000000000000000000002'];
+  const saves = new Map<string, CharacterSave>();
+  let pendingSave: Promise<unknown> | undefined;
   GameServer.characters = new CharacterStore(characterCollection({
     findOne: async ({ _id }: { _id: ObjectId }) => {
       const index = ids.indexOf(_id.toString());
-      return index < 0 ? null : { _id, name: 'Scout' + index, x: '30', y: String(31 + index), weapon: 'sword1', armor: 'clotharmor' };
+      const save = saves.get(_id.toString());
+      return index < 0 ? null : { _id, name: 'Scout' + index, x: '30', y: String(31 + index), weapon: 'sword1', armor: 'clotharmor', ...save };
+    },
+    updateOne: async ({ _id }, { $set }) => {
+      await pendingSave;
+      saves.set(_id.toString(), $set);
+      return { matchedCount: 1 };
     },
   }));
   await GameServer.readMap();
@@ -60,9 +71,11 @@ test('world clients share one room, reserve characters and reconnect', async () 
     expect(await rejected.promise).toBe(4409);
     await duplicate.leave();
     const chat = Promise.withResolvers<unknown>();
-    second.onMessage('chat', chat.resolve);
-    first.send('chat', 'Nearby');
+    const messages: unknown[] = [];
+    second.onMessage('chat', message => { messages.push(message); chat.resolve(message); });
+    expect(await first.request('chat', 'Nearby')).toBe(true);
     expect(await chat.promise).toEqual({ id: firstPlayer, txt: 'Nearby' });
+    expect(await first.request('chat', 'Too soon')).toBe(false);
 
     const player = GameServer.getPlayer(first.sessionId);
     if (!player) throw new Error('The first character did not enter');
@@ -77,13 +90,21 @@ test('world clients share one room, reserve characters and reconnect', async () 
     first.onMessage('reset', corrected.resolve);
     first.send('path', { path: [], action: { action: 0 }, or: 3 });
     expect(await corrected.promise).toEqual({
-      x: 31, y: 31, route: { path: [{ x: 31, y: 31 }, { x: 32, y: 31 }], orientation: 3 },
+      x: 31, y: 31, route: { path: [{ x: 31, y: 31 }, { x: 32, y: 31 }], orientation: 3, elapsed: expect.any(Number) },
     });
+    expect(messages).toEqual([{ id: firstPlayer, txt: 'Nearby' }]);
 
     const token = first.reconnectionToken;
     first.reconnection.enabled = false;
     await first.leave(false);
+    const room = matchMaker.getLocalRoomById(roomId) as WorldRoom;
+    for (let i = 0; i < 100 && room.state.online !== 1; i++) await Bun.sleep(10);
+    expect(room.state.online).toBe(1);
+    player.updatePacket.addKilled(7);
+    room.broadcastPatch();
     const resumed = await sdk.reconnect<WorldRoom>(token);
+    const updates: unknown[] = [];
+    resumed.onMessage('playerEvents', update => updates.push(update));
     expect(resumed.sessionId).toBe(first.sessionId);
     expect(await ready(resumed)).toMatchObject({ x: 31, y: 31 });
     expect(await localPlayer(resumed)).toBe(firstPlayer);
@@ -91,10 +112,12 @@ test('world clients share one room, reserve characters and reconnect', async () 
       await Bun.sleep(10);
     }
     expect(resumed.state.players.get(String(firstPlayer))).toMatchObject({ routeOrientation: 3, x: 30 });
+    for (let i = 0; i < 50 && !updates.length; i++) await Bun.sleep(10);
+    expect(updates).toEqual([{ killed: [7] }]);
     await resumed.leave();
     const next = await sdk.join<WorldRoom>('world', { id: ids[0] });
     expect(next.sessionId).not.toBe(first.sessionId);
-    await ready(next);
+    expect(await ready(next)).toMatchObject({ x: 31, y: 31 });
     expect(await localPlayer(next)).not.toBe(firstPlayer);
     await next.leave();
 
@@ -106,7 +129,20 @@ test('world clients share one room, reserve characters and reconnect', async () 
     const loaded = await sdk.join<WorldRoom>('world', { id: ids[1] });
     await ready(loaded);
     expect(await localPlayer(loaded)).not.toBe(secondPlayer);
-    await loaded.leave();
+    loaded.reconnection.enabled = false;
+    await loaded.leave(false);
+    for (let i = 0; i < 100 && room.state.online !== 0; i++) await Bun.sleep(10);
+    expect(room.state.online).toBe(0);
+    const finalSave = Promise.withResolvers<void>();
+    pendingSave = finalSave.promise;
+    const closing = room.disconnect();
+    try {
+      const closedEarly = await Promise.race([closing.then(() => true), Bun.sleep(100).then(() => false)]);
+      expect(closedEarly).toBe(false);
+    } finally {
+      finalSave.resolve();
+      await closing;
+    }
   } finally {
     await server.gracefullyShutdown(false);
   }

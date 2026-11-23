@@ -67,9 +67,9 @@ const world = new WorldScene(
   },
   (path, orientation, action) => connection.move(path, orientation, action),
   (alive) => {
+    reviveButton.disabled = false;
     if (reviveButton.hidden === alive) return;
     reviveButton.hidden = alive;
-    reviveButton.disabled = false;
     showHealth(alive ? 100 : 0);
   },
   (slot, key) => {
@@ -213,12 +213,19 @@ characterForm.addEventListener('submit', (event) => {
   connection.play(saved ? undefined : name);
 });
 
-chatForm.addEventListener('submit', (event) => {
+chatForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const text = chatMessage.value.trim();
-  if (playerId === undefined || !connection.chat(text)) return;
-  world.say(playerId, text);
-  chatMessage.value = '';
+  const sender = playerId;
+  if (sender === undefined) return;
+  if (!await connection.chat(text)) {
+    chatMessage.setCustomValidity('Message not sent. Try again.');
+    chatMessage.reportValidity();
+    chatMessage.setCustomValidity('');
+    return;
+  }
+  if (playerId === sender) world.say(sender, text);
+  if (chatMessage.value.trim() === text) chatMessage.value = '';
 });
 
 document.addEventListener('keydown', (event) => {

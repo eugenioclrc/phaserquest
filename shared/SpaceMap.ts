@@ -7,7 +7,7 @@ type CollectedMethod<T> = {
 }[keyof T];
 
 // A sparse coordinate map that preserves entity order within each tile.
-class spaceMap<T extends object> {
+class SpaceMap<T extends object> {
   [x: number]: Partial<Record<number, T[]>> | undefined;
 
   add(x: number, y: number, object: T): void {
@@ -44,7 +44,7 @@ class spaceMap<T extends object> {
     const objects = this.get(x, y);
     if (!objects) return null;
     for (const object of objects) {
-      if (!filters.every(key => object[key])) return null;
+      if (!filters.every(key => object[key])) continue;
       if (!notFilters.some(key => object[key])) return object;
     }
     return null;
@@ -73,4 +73,4 @@ class spaceMap<T extends object> {
   }
 }
 
-export { spaceMap };
+export { SpaceMap };

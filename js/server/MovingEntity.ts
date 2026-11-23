@@ -53,7 +53,8 @@ abstract class MovingEntity extends GameObject {
     const previousY = this.y;
     // this.speed is the amount of time need to travel a distance of 1 tile;
     // delta = the number of tiles traveled since departure
-    let delta = Math.ceil(Math.abs(Date.now() - route.departureTime) / this.speed);
+    const elapsed = Math.max(0, this.lastWalkUpdate - route.departureTime) / this.speed;
+    let delta = this.isPlayer() ? Math.floor(elapsed) : Math.ceil(elapsed);
     const maxDelta = route.path.length - 1;
     if (delta > maxDelta) delta = maxDelta;
     route.step = delta;

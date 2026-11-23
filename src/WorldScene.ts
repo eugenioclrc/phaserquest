@@ -1,8 +1,9 @@
-import { playerStepMs, type MovementCorrection } from '../shared/WorldProtocol.ts';
+import { maxClickDistance, maxPathLength, playerStepMs, type MovementCorrection } from '../shared/WorldProtocol.ts';
 import * as Phaser from 'phaser';
 import EasyStar from 'easystarjs';
 import type { ItemSnapshot, PathAction, PersonalUpdate, PlayerSnapshot, Tile, WorldUpdate } from './protocol.ts';
 import { MonsterView, type MonsterDefinition } from './MonsterView.ts';
+import { turnFrom, walkProgress, type PlayerWalk } from './playerWalk.ts';
 
 type Direction = 1 | 2 | 3 | 4;
 
@@ -34,7 +35,7 @@ type Door = {
   bounds?: Phaser.Geom.Rectangle;
 };
 
-type DoorCrossing = { path: Tile[]; door: Door; previous?: Door };
+type DoorCrossing = { path: Tile[]; door: Door; previous?: Door; completed: boolean };
 
 type Avatar = Speaker & {
   container: Phaser.GameObjects.Container;
@@ -48,7 +49,7 @@ type Avatar = Speaker & {
   inFight?: boolean;
   targetID?: number;
   routeVersion?: number;
-  motion?: Phaser.Tweens.Tween;
+  motion?: PlayerWalk & { finish(): void; redirect?: { from: Tile; fraction: number } };
 };
 
 const npcTilesetFirstGid = 1961;
@@ -292,11 +293,13 @@ export class WorldScene extends Phaser.Scene {
   }
 
   update(time: number) {
+    const now = performance.now();
     for (const monster of this.monsters.values()) {
       const target = monster.targetID === undefined ? undefined : this.avatars.get(monster.targetID);
       monster.render(time, target?.alive ? this.tileAt(target) : undefined);
     }
     for (const avatar of this.avatars.values()) {
+      this.updateWalk(avatar, now);
       if (!avatar.inFight || !avatar.alive || avatar.motion || avatar.targetID === undefined) continue;
       const monster = this.monsters.get(avatar.targetID);
       const tile = this.tileAt(avatar);
@@ -311,19 +314,23 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  reset({ x, y, route }: MovementCorrection) {
+  reset({ x, y, route, teleport }: MovementCorrection) {
     const hero = this.heroId === undefined ? undefined : this.avatars.get(this.heroId);
     if (!hero) return;
     // A server reset can echo the original Tiled strings after a teleport.
     const tile = { x: Number(x), y: Number(y) };
     if (!Number.isInteger(tile.x) || !Number.isInteger(tile.y)) return;
     const confirmed = this.crossingsByDestination.get(tileKey(tile));
+    if (teleport && confirmed?.completed && !route) {
+      this.crossingsByDestination.delete(tileKey(tile));
+      return;
+    }
     this.crossingsByDestination.clear();
     if (confirmed?.door.orientation) hero.direction = confirmed.door.orientation;
     this.destination?.setVisible(false);
     this.place(hero, tile);
     const crossing = this.lastCrossing;
-    // The server can reach the door before or after the local tween.
+    // The server can reach the door before or after the local walk finishes.
     if (confirmed) {
       if (!confirmed.previous) this.onOutdoorArrival(confirmed.path[confirmed.path.length - 1]);
       this.lastCrossing = confirmed;
@@ -332,7 +339,7 @@ export class WorldScene extends Phaser.Scene {
       this.lastCrossing = undefined;
       if (isCrossingSource(tile, crossing.path)) this.setHeroCamera(hero, crossing.previous);
     }
-    if (route && hero.alive) this.move(hero, route.path, route.orientation);
+    if (route && hero.alive) this.move(hero, route.path, route.orientation, route.elapsed);
   }
 
   say(id: number, text: string) {
@@ -527,7 +534,6 @@ export class WorldScene extends Phaser.Scene {
       this.place(avatar, { x: changes.x, y: changes.y });
     }
     if (!avatar.alive) {
-      avatar.motion?.stop();
       avatar.motion = undefined;
       if (isHero) this.destination?.setVisible(false);
     }
@@ -547,7 +553,6 @@ export class WorldScene extends Phaser.Scene {
   private removeAvatar(id: number) {
     const avatar = this.avatars.get(id);
     if (!avatar) return;
-    avatar.motion?.stop();
     avatar.speechTimer?.remove();
     avatar.container.destroy();
     this.avatars.delete(id);
@@ -557,6 +562,8 @@ export class WorldScene extends Phaser.Scene {
     if (this.heroId === undefined || (!pointer.wasTouch && !pointer.leftButtonReleased())) return;
     const hero = this.avatars.get(this.heroId);
     if (!hero?.alive) return;
+    const now = performance.now();
+    this.updateWalk(hero, now);
     const at = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
     const clicked = { x: Math.floor(at.x / this.tileWidth), y: Math.floor(at.y / this.tileHeight) };
     const target: { tile: Tile; action: PathAction; rank: number; npc?: NpcView } = {
@@ -578,7 +585,8 @@ export class WorldScene extends Phaser.Scene {
     for (const npc of this.npcs.values()) consider(npc.sprite, npc.tile, { action: 0 }, npc);
     const { tile, action, npc } = target;
     const end = npc ? { x: tile.x, y: tile.y + 1 } : tile;
-    const start = this.tileAt(hero);
+    const turn = hero.motion && turnFrom(hero.motion, now);
+    const start = turn?.tile ?? this.tileAt(hero);
     if (npc && tileDistance(start, end) === 0) {
       if (hero.motion) return;
       hero.direction = 2;
@@ -586,13 +594,14 @@ export class WorldScene extends Phaser.Scene {
       this.speak(npc);
       return;
     }
-    if (tileDistance(start, end) > 28) return;
+    if (tileDistance(start, end) > maxClickDistance) return;
     const path = this.findPath(start, end);
     if (!path || path.length < 2) return;
     const orientation = npc ? 2 : directionBetween(path[path.length - 2], end);
     if (action.action !== 0) path.pop();
-    if (path.length > 60 || !this.onPath(path, orientation, action)) return;
-    this.move(hero, path, orientation, 0, npc ? () => this.speak(npc) : undefined);
+    if (path.length > maxPathLength || !this.onPath(path, orientation, action)) return;
+    const localPath = turn?.previous ? [turn.previous, ...path] : path;
+    this.move(hero, localPath, orientation, turn?.elapsed, npc ? () => this.speak(npc) : undefined, now);
   }
 
   private findPath(start: Tile, end: Tile): Tile[] | null {
@@ -603,34 +612,23 @@ export class WorldScene extends Phaser.Scene {
     return path;
   }
 
-  private move(avatar: Avatar, path: Tile[], orientation?: number, latency = 0, onComplete?: () => void) {
-    avatar.motion?.stop();
+  private move(avatar: Avatar, path: Tile[], orientation?: number, elapsed = 0, onComplete?: () => void, now = performance.now()) {
     const end = path[path.length - 1];
     const door = this.doors.get(tileKey(end));
     const isHero = this.heroId !== undefined && this.avatars.get(this.heroId) === avatar;
-    const crossing = isHero && door ? { path, door, previous: this.cameraDoor } : undefined;
+    const crossing = isHero && door ? { path, door, previous: this.cameraDoor, completed: false } : undefined;
     if (isHero) {
       if (crossing) this.crossingsByDestination.set(tileKey(crossing.door.to), crossing);
       this.destination?.setPosition(end.x * this.tileWidth, end.y * this.tileHeight).setVisible(true);
     }
-    avatar.motion = this.tweens.addCounter({
-      from: 0, to: path.length - 1, duration: Math.max(1, (path.length - 1) * playerStepMs - latency),
-      onUpdate: (tween) => {
-        if (path.length === 1) return;
-        const progress = tween.getValue() ?? 0;
-        const index = Math.min(Math.floor(progress), path.length - 2);
-        const from = path[index];
-        const to = path[index + 1];
-        const fraction = progress - index;
-        avatar.direction = directionBetween(from, to);
-        this.position(avatar, {
-          x: from.x + (to.x - from.x) * fraction,
-          y: from.y + (to.y - from.y) * fraction,
-        });
-        this.showFrame(avatar, walkFrame[avatar.direction] + Math.floor(progress * 2) % 4);
+    avatar.motion = {
+      path,
+      startedAt: now - elapsed,
+      redirect: avatar.motion && {
+        from: { x: avatar.container.x / this.tileWidth, y: avatar.container.y / this.tileHeight },
+        fraction: elapsed / playerStepMs,
       },
-      onComplete: () => {
-        avatar.motion = undefined;
+      finish: () => {
         const finalDirection = door?.orientation ?? orientation;
         if (isDirection(finalDirection)) avatar.direction = finalDirection;
         this.position(avatar, door?.to ?? end);
@@ -639,13 +637,37 @@ export class WorldScene extends Phaser.Scene {
           if (!this.cameraDoor) this.onOutdoorArrival(end);
           this.destination?.setVisible(false);
           if (crossing) {
+            crossing.completed = true;
             this.lastCrossing = crossing;
             this.setHeroCamera(avatar, crossing.door);
           }
         }
         onComplete?.();
       },
+    };
+  }
+
+  private updateWalk(avatar: Avatar, now: number) {
+    const motion = avatar.motion;
+    if (!motion) return;
+    const progress = walkProgress(motion, now);
+    const index = Math.floor(progress);
+    const next = motion.path[index + 1];
+    if (!next) {
+      avatar.motion = undefined;
+      motion.finish();
+      return;
+    }
+    const redirect = index === 0 ? motion.redirect : undefined;
+    const from = redirect?.from ?? motion.path[index];
+    const start = redirect?.fraction ?? 0;
+    const fraction = (progress - index - start) / (1 - start);
+    avatar.direction = directionBetween(motion.path[index], next);
+    this.position(avatar, {
+      x: from.x + (next.x - from.x) * fraction,
+      y: from.y + (next.y - from.y) * fraction,
     });
+    this.showFrame(avatar, walkFrame[avatar.direction] + Math.floor(progress * 2) % 4);
   }
 
   private tileAt(avatar: Avatar): Tile {
@@ -656,7 +678,6 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private place(avatar: Avatar, tile: Tile) {
-    avatar.motion?.stop();
     avatar.motion = undefined;
     this.position(avatar, tile);
     this.showFrame(avatar, idleFrame[avatar.direction]);

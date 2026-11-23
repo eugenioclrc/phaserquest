@@ -1,34 +1,36 @@
-import { Room, type Client } from '@colyseus/core';
-import { StateView } from '@colyseus/schema';
-import { AOIutils } from '../../shared/AOIutils.ts';
-import { CharacterJoinError, type PathCommand } from '../../shared/WorldProtocol.ts';
-import {
-  SelfState, WorldState, entityCollection, syncEntity,
-  type VisibleEntity,
-} from './WorldState.ts';
-
+import core = require('@colyseus/core');
+import colyseus = require('@colyseus/schema');
+import spatialAreas = require('../../shared/AOIutils.ts');
+import protocol = require('../../shared/WorldProtocol.ts');
+import world = require('./WorldState.ts');
+import type { ReplicatedWorld, VisibleEntity } from './WorldTypes.ts';
+import type { Client } from '@colyseus/core';
+import type { PathCommand } from '../../shared/WorldProtocol.ts';
 import GameServer = require('./GameServer.ts');
 import type GameObject = require('./GameObject.ts');
 import type Player = require('./Player.ts');
 
+const { AOIutils } = spatialAreas;
+const { CharacterJoinError, chatCooldownMs } = protocol;
+const { SelfState, WorldState, entityCollection, syncEntity } = world;
+
 type Session = {
   id: unknown;
   player?: Promise<Player | null>;
-  view: StateView;
+  view: colyseus.StateView;
   seen: Set<VisibleEntity>;
   area?: number;
   ready: boolean;
-  stamp: number;
-  samples: number[];
-  latency: number;
+  nextChatAt: number;
 };
 
-export class WorldRoom extends Room<{ state: WorldState }> {
+class WorldRoom extends core.Room<{ state: ReplicatedWorld }> {
   state = new WorldState();
   autoDispose = false;
   patchRate = 200;
 
   private sessions = new Map<string, Session>();
+  private departures = new Set<Promise<void>>();
 
   onCreate() {
     this.setTimestep(() => GameServer.update(), GameServer.updateRate);
@@ -37,15 +39,15 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.clock.setInterval(() => {
       for (const client of this.clients) {
         const session = this.sessions.get(client.sessionId);
-        if (session?.ready) client.send('ping', session.stamp = Date.now());
+        if (session?.ready) client.send('ping', Date.now());
       }
     }, 5000);
   }
 
   onJoin(client: Client, options: { id?: unknown }) {
-    const view = client.view = new StateView();
+    const view = client.view = new colyseus.StateView();
     this.sessions.set(client.sessionId, {
-      id: options?.id, view, seen: new Set(), ready: false, stamp: 0, samples: [], latency: 0,
+      id: options?.id, view, seen: new Set(), ready: false, nextChatAt: 0,
     });
   }
 
@@ -56,28 +58,41 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     await this.allowReconnection(client, 10).catch(() => {});
   }
 
-  async onLeave(client: Client) {
-    const session = this.sessions.get(client.sessionId);
-    if (!this.sessions.delete(client.sessionId)) return;
-    this.state.self.delete(client.sessionId);
-    await session?.player?.catch(() => {});
-    await GameServer.removePlayer(client.sessionId);
+  onLeave(client: Client) {
+    return this.leaveSession(client.sessionId);
   }
 
-  onDispose() {
+  private leaveSession(sessionId: string) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    this.sessions.delete(sessionId);
+    this.state.self.delete(sessionId);
+    const departure = Promise.resolve(session.player)
+      .catch(() => {})
+      .then(() => GameServer.removePlayer(sessionId))
+      .finally(() => this.departures.delete(departure));
+    this.departures.add(departure);
+    return departure;
+  }
+
+  async onDispose() {
     this.clock.clear();
+    // The room can start closing before dropped clients finish leaving.
+    for (const sessionId of this.sessions.keys()) this.leaveSession(sessionId);
+    const results = await Promise.allSettled(this.departures);
+    for (const result of results) if (result.status === 'rejected') throw result.reason;
   }
 
   onBeforePatch() {
     this.syncWorld();
     for (const [sessionId, session] of this.sessions) {
-      const player = GameServer.getPlayer(sessionId);
-      const update = player?.getIndividualUpdatePackage()?.clean();
-      if (!session.ready || !update) continue;
+      if (!session.ready) continue;
       const client = this.clients.getById(sessionId);
       if (!client) continue;
+      const update = GameServer.getPlayer(sessionId)?.getIndividualUpdatePackage()?.clean();
+      if (!update) continue;
       const { x, y, teleport, ...events } = update;
-      if (teleport) client.send('reset', teleport, { afterNextPatch: true });
+      if (teleport) client.send('reset', { ...teleport, teleport: true }, { afterNextPatch: true });
       if (x !== undefined && y !== undefined) client.send('revived', { x, y }, { afterNextPatch: true });
       if (Object.keys(events).length) client.send('playerEvents', events, { afterNextPatch: true });
     }
@@ -139,7 +154,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         if (!player || session.ready || this.clients.getById(sessionId) !== client) return;
         session.ready = true;
         const { x, y } = player;
-        client.send('ready', { x, y, stamp: session.stamp = Date.now() });
+        client.send('ready', { x, y, stamp: Date.now() });
       } catch (error) {
         const code = (error as { code?: keyof typeof CharacterJoinError }).code;
         client.send('entryError', (code && CharacterJoinError[code]) || CharacterJoinError.unavailable);
@@ -148,33 +163,30 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     path: (client: Client, command: PathCommand) => {
       const session = this.sessions.get(client.sessionId);
       if (!session?.ready) return;
-      if (!GameServer.handlePath(client.sessionId, command, session.latency)) {
+      if (!GameServer.handlePath(client.sessionId, command)) {
         client.send('reset', GameServer.getMovementCorrection(client.sessionId));
       }
     },
     revive: (client: Client) => {
       if (this.sessions.get(client.sessionId)?.ready) GameServer.getPlayer(client.sessionId)?.revive();
     },
+    ponq: () => {}, // Older tabs still reply to clock updates.
     chat: (client: Client, txt: string) => {
-      if (!this.sessions.get(client.sessionId)?.ready || typeof txt !== 'string' || !txt.trim() || txt.length > 300) return;
+      const session = this.sessions.get(client.sessionId);
+      const now = Date.now();
+      if (!session?.ready || now < session.nextChatAt || typeof txt !== 'string' || !txt.trim() || txt.length > 300) return false;
       const sender = GameServer.getPlayer(client.sessionId);
-      if (!sender) return;
+      if (!sender) return false;
+      session.nextChatAt = now + chatCooldownMs - 100; // Allow for variation in message transit time.
       const nearby = AOIutils.listAdjacentAOIs(sender.aoi);
       for (const peer of this.clients) {
         if (peer === client || !this.sessions.get(peer.sessionId)?.ready) continue;
         const player = GameServer.getPlayer(peer.sessionId);
         if (player && nearby.includes(player.aoi)) peer.send('chat', { id: sender.id, txt });
       }
-    },
-    ponq: (client: Client, stamp: number) => {
-      const session = this.sessions.get(client.sessionId);
-      if (!session?.ready || !session.stamp || stamp !== session.stamp) return;
-      const sample = Math.min(500, Math.max(0, (Date.now() - stamp) / 2));
-      session.stamp = 0;
-      session.samples.push(sample);
-      if (session.samples.length > 20) session.samples.shift();
-      const sorted = session.samples.toSorted((a, b) => a - b);
-      session.latency = sorted[Math.floor((sorted.length - 1) / 2)];
+      return true;
     },
   };
 }
+
+export = WorldRoom;

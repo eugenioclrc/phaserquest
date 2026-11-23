@@ -6,7 +6,13 @@ Phaser Quest is a reproduction of Mozilla's [Browserquest](http://browserquest.m
 
 ## Run locally
 
-Install Bun 1.3.10 or newer and start MongoDB. Then run:
+Install Bun 1.3.10 or newer and start MongoDB. If you installed MongoDB with Homebrew on Apple Silicon, start it in a separate terminal with this command.
+
+```sh
+mongod --config /opt/homebrew/etc/mongod.conf
+```
+
+From the project directory, run:
 
 ```sh
 bun install --frozen-lockfile
@@ -27,6 +33,8 @@ bun run start
 ```
 
 The build writes the browser bundle to `dist/`. The game server serves the bundle and the game assets alongside the Colyseus WebSocket endpoint. Keep `dist/`, `assets/`, `shared/`, and the server code together when deploying. After building, runtime dependencies can be installed with `bun install --frozen-lockfile --production`.
+
+Behind a reverse proxy, set `TRUST_PROXY_HOPS` to the number of trusted proxies between the client and the server so the character API counts requests per client. The default is `0` for direct connections. Only use a positive count when every incoming connection traverses that many trusted proxies.
 
 ## Code layout
 
